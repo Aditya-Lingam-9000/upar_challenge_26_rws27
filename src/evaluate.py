@@ -38,6 +38,19 @@ def get_device() -> torch.device:
     return torch.device("cpu")
 
 
+def format_duration(seconds: float) -> str:
+    """Format duration in seconds to human-readable string (e.g., '14m 23s' or '02h 15m 10s')."""
+    if seconds is None or np.isnan(seconds) or np.isinf(seconds) or seconds < 0:
+        return "--m --s"
+    seconds = int(seconds)
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+    if hours > 0:
+        return f"{hours:02d}h {minutes:02d}m {secs:02d}s"
+    return f"{minutes:02d}m {secs:02d}s"
+
+
 @torch.no_grad()
 def extract_gallery_probabilities(
     model: torch.nn.Module,
@@ -70,8 +83,12 @@ def extract_gallery_probabilities(
             elapsed = time.time() - t_start
             speed = processed / max(elapsed, 1e-4)
             pct = (batch_idx + 1) / total_batches * 100
+            val_rem_batches = total_batches - (batch_idx + 1)
+            val_sec_per_batch = elapsed / (batch_idx + 1)
+            val_eta_sec = val_rem_batches * val_sec_per_batch
             print(f"[Evaluation] Gallery Extraction: [{processed:5d}/{total_samples:5d}] ({pct:5.1f}%) | "
-                  f"Batch [{batch_idx + 1:3d}/{total_batches:3d}] | Speed: {speed:5.1f} img/s", flush=True)
+                  f"Batch [{batch_idx + 1:3d}/{total_batches:3d}] | Speed: {speed:5.1f} img/s | "
+                  f"ETA: {format_duration(val_eta_sec)}", flush=True)
 
     return np.vstack(all_probs)
 

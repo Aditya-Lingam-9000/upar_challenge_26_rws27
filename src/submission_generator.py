@@ -25,8 +25,8 @@ def generate_run_py(
     model_name: str = "convnext_base",
     height: int = 384,
     width: int = 192,
-    temperature: float = 0.80,
-    use_tta: bool = True,
+    temperature: float = 1.0,
+    use_tta: bool = False,
 ) -> str:
     """Generate self-contained pure PyTorch run.py module."""
 
@@ -253,8 +253,8 @@ def package_submission(
     model_name: Optional[str] = None,
     height: Optional[int] = None,
     width: Optional[int] = None,
-    temperature: float = 0.80,
-    use_tta: bool = True,
+    temperature: float = 1.0,
+    use_tta: bool = False,
 ) -> str:
     """Create Codabench zip package supporting ResNet-50 and ConvNeXt-Base."""
     os.makedirs(staging_dir, exist_ok=True)

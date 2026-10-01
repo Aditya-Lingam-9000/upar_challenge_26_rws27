@@ -82,6 +82,48 @@ def get_memory_info(device: torch.device) -> str:
     return "CPU"
 
 
+def format_duration(seconds: float) -> str:
+    """Format duration in seconds to human-readable string (e.g., '14m 23s' or '02h 15m 10s')."""
+    if seconds is None or np.isnan(seconds) or np.isinf(seconds) or seconds < 0:
+        return "--m --s"
+    seconds = int(seconds)
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+    if hours > 0:
+        return f"{hours:02d}h {minutes:02d}m {secs:02d}s"
+    return f"{minutes:02d}m {secs:02d}s"
+
+
+def print_codabench_table(
+    epoch: int,
+    epochs: int,
+    metrics: dict[str, float],
+    exp_id: str = "EXP-003",
+    participant: str = "Jyothiradithya Lingam",
+    is_best: bool = False,
+) -> None:
+    """Print validation results in the exact official Codabench competition leaderboard table format."""
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    print("\n" + "=" * 115, flush=True)
+    print("Results", flush=True)
+    print(f"Task:        Attribute-based Person Retrieval - validation set (Epoch {epoch:02d}/{epochs:02d})", flush=True)
+    print(f"{'#':<4} {'Participant':<26} {'Date':<18} {'ID':<10} {'mADM':<9} {'mAP':<9} {'Rank-1':<9} {'Rank-5':<9} {'Rank-10':<9} {'mINP':<9}", flush=True)
+    print("-" * 115, flush=True)
+    print(
+        f"{epoch:<4} {participant:<26} {now_str:<18} {exp_id:<10} "
+        f"{metrics['mADM']:<9.4f} {metrics['mAP']:<9.4f} "
+        f"{metrics['Rank-1']:<9.4f} {metrics['Rank-5']:<9.4f} {metrics['Rank-10']:<9.4f} "
+        f"{metrics['mINP']:<9.4f}",
+        flush=True,
+    )
+    if "PAR_mA" in metrics:
+        print(f"Pedestrian Attribute Recognition (PAR) Mean Accuracy: {metrics['PAR_mA'] * 100:.2f}%", flush=True)
+    if is_best:
+        print(f"*** NEW BEST VALIDATION SCORE: mADM = {metrics['mADM']:.4f} ***", flush=True)
+    print("=" * 115 + "\n", flush=True)
+
+
 def train_one_epoch(
     model: nn.Module,
     train_loader: DataLoader,
@@ -96,8 +138,10 @@ def train_one_epoch(
     log_interval: int = 50,
     is_master: bool = True,
     world_size: int = 1,
+    last_epoch_sec: Optional[float] = None,
+    last_val_sec: Optional[float] = None,
 ) -> dict[str, float]:
-    """Train model for one epoch with continuous stdout logging."""
+    """Train model for one epoch with continuous stdout logging and real-time ETAs."""
     model.train()
     running_loss = 0.0
     running_asl = 0.0
@@ -159,7 +203,7 @@ def train_one_epoch(
         running_group += details["loss_group"] * batch_size
         total_samples += batch_size
 
-        # Continuous stdout logging on master rank
+        # Continuous stdout logging on master rank with real-time ETAs
         if is_master and ((batch_idx + 1) % log_interval == 0 or (batch_idx + 1) == total_batches):
             elapsed = time.time() - t_epoch_start
             effective_samples = total_samples * world_size
@@ -169,11 +213,24 @@ def train_one_epoch(
             mem_str = get_memory_info(device)
             now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+            # Precise ETA math: per-epoch and across all remaining epochs
+            done_batches = batch_idx + 1
+            rem_batches_epoch = total_batches - done_batches
+            sec_per_batch = elapsed / done_batches
+            epoch_eta_sec = rem_batches_epoch * sec_per_batch
+
+            est_epoch_sec = last_epoch_sec if last_epoch_sec is not None else (total_batches * sec_per_batch)
+            est_val_sec = last_val_sec if last_val_sec is not None else 150.0
+            remaining_epochs = epochs - epoch
+            total_eta_sec = epoch_eta_sec + est_val_sec + remaining_epochs * (est_epoch_sec + est_val_sec)
+
             print(
                 f"[{now_str}] Epoch [{epoch:02d}/{epochs:02d}] | "
                 f"Batch [{batch_idx + 1:04d}/{total_batches:04d}] ({pct:5.1f}%) | "
                 f"Loss: {details['loss_total']:.4f} (ASL: {details['loss_asl']:.4f}, Grp: {details['loss_group']:.4f}) | "
-                f"LR: {curr_lr:.2e} | Speed: {speed:5.1f} img/s | {mem_str}",
+                f"LR: {curr_lr:.2e} | Speed: {speed:5.1f} img/s | "
+                f"ETA: [Epoch: {format_duration(epoch_eta_sec)} | Total: {format_duration(total_eta_sec)}] | "
+                f"{mem_str}",
                 flush=True,
             )
 
@@ -362,6 +419,9 @@ def train_abpr(
     if is_master:
         print(f"[{exp_id}] Beginning execution from Epoch {start_epoch} through {epochs}...", flush=True)
 
+    last_epoch_sec: Optional[float] = None
+    last_val_sec: Optional[float] = None
+
     for epoch in range(start_epoch, epochs + 1):
         batch_sampler.set_epoch(epoch)
         t0 = time.time()
@@ -379,16 +439,19 @@ def train_abpr(
             log_interval=log_interval,
             is_master=is_master,
             world_size=world_size,
+            last_epoch_sec=last_epoch_sec,
+            last_val_sec=last_val_sec,
         )
         scheduler.step()
         epoch_time = time.time() - t0
+        last_epoch_sec = epoch_time
 
         curr_lr = optimizer.param_groups[0]["lr"]
         if is_master:
             print(
                 f"[{exp_id}] Epoch {epoch:02d}/{epochs:02d} Complete | "
                 f"Train Loss: {train_stats['train_loss']:.4f} (ASL: {train_stats['train_asl']:.4f}, Grp: {train_stats['train_group']:.4f}) | "
-                f"LR: {curr_lr:.2e} | Duration: {epoch_time:.1f}s ({epoch_time / 60:.1f}m)",
+                f"LR: {curr_lr:.2e} | Duration: {format_duration(epoch_time)}",
                 flush=True,
             )
 
@@ -400,6 +463,7 @@ def train_abpr(
         # Validation evaluation on master rank
         if is_master and (epoch % eval_interval == 0 or epoch == epochs):
             print(f"[{exp_id}] Running full validation evaluation (33,407 gallery, 3,462 queries)...", flush=True)
+            t_val_start = time.time()
             eval_model = model.module if hasattr(model, "module") else model
             val_metrics = run_full_evaluation(
                 model=eval_model,
@@ -411,21 +475,22 @@ def train_abpr(
                 num_workers=num_workers,
                 use_fp16=use_fp16,
             )
+            val_duration = time.time() - t_val_start
+            last_val_sec = val_duration
 
             current_madm = val_metrics["mADM"]
-            print(
-                f"[{exp_id}] Val Evaluation (Epoch {epoch:02d}) -> "
-                f"mADM: {current_madm:.6f} | "
-                f"mAP: {val_metrics['mAP']:.4f} | "
-                f"Rank-1: {val_metrics['Rank-1']*100:.2f}% | "
-                f"Rank-5: {val_metrics['Rank-5']*100:.2f}% | "
-                f"Rank-10: {val_metrics['Rank-10']*100:.2f}% | "
-                f"mINP: {val_metrics['mINP']:.4f} | "
-                f"PAR mA: {val_metrics['PAR_mA']*100:.2f}%",
-                flush=True,
+            is_best = current_madm > best_madm
+
+            # Print results formatted strictly matching the official Codabench server table
+            print_codabench_table(
+                epoch=epoch,
+                epochs=epochs,
+                metrics=val_metrics,
+                exp_id=exp_id,
+                participant="Jyothiradithya Lingam",
+                is_best=is_best,
             )
 
-            is_best = current_madm > best_madm
             raw_save_state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
 
             if is_best:
@@ -537,7 +602,7 @@ if __name__ == "__main__":
     parser.add_argument("--accumulation_steps", type=int, default=1)
     parser.add_argument("--save_dir", type=str, default="checkpoints")
     parser.add_argument("--exp_id", type=str, default="EXP-003")
-    parser.add_argument("--eval_interval", type=int, default=2)
+    parser.add_argument("--eval_interval", type=int, default=1)
     parser.add_argument("--num_workers", type=int, default=None)
     parser.add_argument("--resume", type=str, default=None)
     parser.add_argument("--log_interval", type=int, default=50)
