@@ -481,11 +481,29 @@
 
 ---
 
+### Step 22: Kaggle Dataset Path Auto-Resolution Engine & Remote Hotfix Deployment
+- **Date / Timestamp:** 2026-10-01 19:40
+- **What Was Done:**
+  - Diagnosed user execution failure on Kaggle: `FileNotFoundError: Training annotations not found at: /kaggle/input/datasets/hinewk/upar-challenge-2027-data/annotations/train.csv`.
+  - Root-Cause: The uploaded Kaggle dataset archive contained an internal `/data` root directory, placing annotations at `/kaggle/input/datasets/hinewk/upar-challenge-2027-data/data/annotations/train.csv` rather than directly under the dataset folder.
+  - Implemented `resolve_data_root()` in [`src/dataset.py`](file:///Users/sama/D/RWS2027/src/dataset.py) to automatically detect and resolve the true data root across any arbitrary nesting hierarchy:
+    1. Direct path check (`annotations/train.csv`).
+    2. Subdirectory check (`data/annotations/train.csv`, `UPAR-Challenge-2027/data/`, etc.).
+    3. Recursive traversal searching `/kaggle/input/**/annotations/train.csv`.
+  - Integrated `resolve_data_root()` into [`src/train.py`](file:///Users/sama/D/RWS2027/src/train.py) and [`src/evaluate.py`](file:///Users/sama/D/RWS2027/src/evaluate.py).
+  - Updated Cell 2 in [`notebooks/kaggle_exp003_convnext_base_dual_gpu.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp003_convnext_base_dual_gpu.ipynb) to auto-discover the true dataset directory path before launching training.
+  - Committed and pushed hotfix directly to `main` on GitHub (`commit c01ef31`).
+- **What Changed / Created:**
+  - Modified [`src/dataset.py`](file:///Users/sama/D/RWS2027/src/dataset.py), [`src/train.py`](file:///Users/sama/D/RWS2027/src/train.py), [`src/evaluate.py`](file:///Users/sama/D/RWS2027/src/evaluate.py), [`notebooks/kaggle_exp003_convnext_base_dual_gpu.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp003_convnext_base_dual_gpu.ipynb).
+- **Why It Changed / Rationale:**
+  - Guarantees zero dataset path errors on Kaggle regardless of how the user or platform extracts the uploaded dataset archive.
+
+---
+
 ## Next Steps Roadmap
-1. **Launch Kaggle Dual-GPU Notebook:**
-   - Open Kaggle, create a new notebook attached to the private dataset `upar-challenge-2027-data` with Accelerator set to **GPU T4 x 2**.
-   - Import or paste [`notebooks/kaggle_exp003_convnext_base_dual_gpu.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp003_convnext_base_dual_gpu.ipynb).
-   - Click **"Save Version" $\to$ "Save & Run All (Commit)"** to run the 30-epoch training in the background.
+1. **Pull Hotfix & Launch in Kaggle:**
+   - In the Kaggle notebook, re-run Cell 3 (`git pull origin main`) or re-run the notebook.
+   - Run Cell 4 to launch the multi-GPU 30-epoch training.
 2. **Download Artifacts & Inspect Metrics:**
    - Download `EXP-003_best.pth` and `EXP-003_submission.zip` from the Kaggle Output tab.
 3. **Submit EXP-003 to Codabench:**
