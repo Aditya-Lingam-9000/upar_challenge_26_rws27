@@ -31,7 +31,12 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 
-from src.dataset import DomainBalancedBatchSampler, UPARDataset, resolve_data_root
+from src.dataset import (
+    DomainBalancedBatchSampler,
+    UPARDataset,
+    resolve_data_root,
+    stage_dataset_to_fast_local_storage,
+)
 from src.evaluate import get_device, run_full_evaluation
 from src.losses import CombinedABPRLoss
 from src.models import build_model
@@ -82,7 +87,12 @@ def train_one_epoch(
 
         # Mixed precision forward pass
         if use_fp16 and device.type == "cuda":
-            with torch.cuda.amp.autocast(dtype=torch.float16):
+            try:
+                autocast_ctx = torch.amp.autocast("cuda", dtype=torch.float16)
+            except (AttributeError, TypeError):
+                autocast_ctx = torch.cuda.amp.autocast(dtype=torch.float16)
+
+            with autocast_ctx:
                 logits = model(images)
                 loss, details = criterion(logits.float(), labels)
                 if accumulation_steps > 1:
@@ -196,14 +206,17 @@ def train_abpr(
         if platform.system() == "Darwin":
             num_workers = 0
         else:
-            # On Linux / Kaggle, use 4 workers for fast data pipelining
-            num_workers = min(4 * max(num_gpus, 1), 8)
+            # 2-4 workers matches Kaggle's 4 vCPUs without process thrashing
+            num_workers = min(2 * max(num_gpus, 1), 4)
 
     # 1. Dataset & Loaders
     resolved_root = resolve_data_root(data_root)
     if resolved_root != data_root:
         print(f"[{exp_id}] Auto-detected & resolved true dataset root: '{resolved_root}' (original: '{data_root}')", flush=True)
         data_root = resolved_root
+
+    # Bypass high-latency cloud FUSE storage by staging dataset into local ultra-fast NVMe/tmpfs
+    data_root = stage_dataset_to_fast_local_storage(data_root)
 
     train_csv = os.path.join(data_root, "annotations", "train.csv")
     if not os.path.exists(train_csv):
@@ -230,10 +243,11 @@ def train_abpr(
         num_workers=num_workers,
         pin_memory=True if device.type == "cuda" else False,
         persistent_workers=True if num_workers > 0 else False,
+        prefetch_factor=2 if num_workers > 0 else None,
     )
 
     print(f"[{exp_id}] Dataset Loaded: {len(train_dataset)} training images across Market1501, PA100k, PETA.")
-    print(f"[{exp_id}] Batches per Epoch: {len(batch_sampler)} | DataLoader Workers: {num_workers}", flush=True)
+    print(f"[{exp_id}] Batches per Epoch: {len(batch_sampler)} | DataLoader Workers: {num_workers} (Prefetch: 2)", flush=True)
 
     # 2. Model Initialization
     raw_model = build_model(model_name, pretrained=True, num_attributes=40)
@@ -256,7 +270,13 @@ def train_abpr(
     optimizer = AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     # Gradient Scaler for mixed precision on CUDA
-    scaler = torch.cuda.amp.GradScaler() if (use_fp16 and device.type == "cuda") else None
+    if use_fp16 and device.type == "cuda":
+        try:
+            scaler = torch.amp.GradScaler("cuda")
+        except (AttributeError, TypeError):
+            scaler = torch.cuda.amp.GradScaler()
+    else:
+        scaler = None
 
     start_epoch = 1
     best_madm = 0.0
