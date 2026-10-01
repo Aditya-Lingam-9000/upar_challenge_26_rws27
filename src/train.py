@@ -43,6 +43,33 @@ from src.models import build_model
 from src.submission_generator import package_submission
 
 
+def setup_distributed() -> tuple[bool, int, int, int]:
+    """Initialize DistributedDataParallel (DDP) if launched via torchrun."""
+    if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
+        rank = int(os.environ["RANK"])
+        world_size = int(os.environ["WORLD_SIZE"])
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        if torch.cuda.is_available():
+            torch.cuda.set_device(local_rank)
+            torch.distributed.init_process_group(
+                backend="nccl",
+                init_method="env://",
+            )
+        else:
+            torch.distributed.init_process_group(
+                backend="gloo",
+                init_method="env://",
+            )
+        return True, rank, world_size, local_rank
+    return False, 0, 1, 0
+
+
+def cleanup_distributed() -> None:
+    """Clean up DDP process group if initialized."""
+    if torch.distributed.is_initialized():
+        torch.distributed.destroy_process_group()
+
+
 def get_memory_info(device: torch.device) -> str:
     """Return current memory usage string."""
     if device.type == "cuda":
@@ -65,8 +92,10 @@ def train_one_epoch(
     epochs: int,
     use_fp16: bool = True,
     accumulation_steps: int = 1,
-    scaler: Optional[torch.cuda.amp.GradScaler] = None,
+    scaler: Optional[torch.amp.GradScaler] = None,
     log_interval: int = 50,
+    is_master: bool = True,
+    world_size: int = 1,
 ) -> dict[str, float]:
     """Train model for one epoch with continuous stdout logging."""
     model.train()
@@ -76,13 +105,11 @@ def train_one_epoch(
     total_samples = 0
 
     total_batches = len(train_loader)
-    total_images_in_epoch = len(train_loader.dataset)
     t_epoch_start = time.time()
-    t_batch_start = time.time()
 
     for batch_idx, (images, labels, _, _) in enumerate(train_loader):
-        images = images.to(device)
-        labels = labels.to(device)
+        images = images.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True)
         batch_size = images.size(0)
 
         # Mixed precision forward pass
@@ -132,10 +159,11 @@ def train_one_epoch(
         running_group += details["loss_group"] * batch_size
         total_samples += batch_size
 
-        # Continuous stdout logging at fixed intervals
-        if (batch_idx + 1) % log_interval == 0 or (batch_idx + 1) == total_batches:
+        # Continuous stdout logging on master rank
+        if is_master and ((batch_idx + 1) % log_interval == 0 or (batch_idx + 1) == total_batches):
             elapsed = time.time() - t_epoch_start
-            speed = total_samples / max(elapsed, 1e-4)
+            effective_samples = total_samples * world_size
+            speed = effective_samples / max(elapsed, 1e-4)
             pct = (batch_idx + 1) / total_batches * 100
             curr_lr = optimizer.param_groups[0]["lr"]
             mem_str = get_memory_info(device)
@@ -181,47 +209,54 @@ def train_abpr(
     accumulation_steps: int = 1,
     save_dir: str = "checkpoints",
     exp_id: str = "EXP-003",
-    eval_interval: int = 1,
+    eval_interval: int = 2,
     num_workers: Optional[int] = None,
     resume_checkpoint: Optional[str] = None,
     log_interval: int = 50,
+    preload_ram: bool = True,
 ) -> dict[str, float]:
     """Execute complete training pipeline and return best evaluation metrics."""
     os.makedirs(save_dir, exist_ok=True)
-    device = get_device()
+    is_distributed, rank, world_size, local_rank = setup_distributed()
+    is_master = (rank == 0)
+
+    if torch.cuda.is_available():
+        device = torch.device(f"cuda:{local_rank}")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
 
     num_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
-    print(f"[{exp_id}] ==========================================================================")
-    print(f"[{exp_id}] Starting RWS 2027 Production Training Run: {exp_id}")
-    print(f"[{exp_id}] Architecture: {model_name} | Input Resolution: {height}x{width}")
-    print(f"[{exp_id}] Device: {device} | Detected CUDA GPUs: {num_gpus} | FP16: {use_fp16}")
-    if num_gpus > 1:
-        gpu_names = [torch.cuda.get_device_name(i) for i in range(num_gpus)]
-        print(f"[{exp_id}] Multi-GPU DataParallel Activated across {num_gpus} devices: {gpu_names}")
-    print(f"[{exp_id}] Batch Size: {batch_size} (effective per step) | Epochs: {epochs}")
-    print(f"[{exp_id}] ==========================================================================", flush=True)
+    if is_master:
+        print(f"[{exp_id}] ==========================================================================")
+        print(f"[{exp_id}] Starting RWS 2027 Production Training Run: {exp_id}")
+        print(f"[{exp_id}] Architecture: {model_name} | Input Resolution: {height}x{width}")
+        print(f"[{exp_id}] Device: {device} | Detected CUDA GPUs: {num_gpus} | FP16: {use_fp16}")
+        if is_distributed:
+            print(f"[{exp_id}] DistributedDataParallel (DDP) Activated: {world_size} processes (NCCL backend, zero PCIe weight broadcast)")
+        else:
+            print(f"[{exp_id}] Single-GPU Engine Activated: direct local execution (zero DataParallel GIL overhead)")
+        print(f"[{exp_id}] Effective Global Batch Size: {batch_size * world_size} | Epochs: {epochs}")
+        print(f"[{exp_id}] ==========================================================================", flush=True)
 
     if num_workers is None:
         import platform
         if platform.system() == "Darwin":
             num_workers = 0
         else:
-            # 2-4 workers matches Kaggle's 4 vCPUs without process thrashing
-            num_workers = min(2 * max(num_gpus, 1), 4)
+            num_workers = 2 if is_distributed else min(4, max(num_gpus, 1) * 2)
 
     # 1. Dataset & Loaders
     resolved_root = resolve_data_root(data_root)
     if resolved_root != data_root:
-        print(f"[{exp_id}] Auto-detected & resolved true dataset root: '{resolved_root}' (original: '{data_root}')", flush=True)
+        if is_master:
+            print(f"[{exp_id}] Auto-detected & resolved true dataset root: '{resolved_root}' (original: '{data_root}')", flush=True)
         data_root = resolved_root
-
-    # Bypass high-latency cloud FUSE storage by staging dataset into local ultra-fast NVMe/tmpfs
-    data_root = stage_dataset_to_fast_local_storage(data_root)
 
     train_csv = os.path.join(data_root, "annotations", "train.csv")
     if not os.path.exists(train_csv):
-        # Print diagnostic directory contents if missing
-        if os.path.exists(data_root):
+        if is_master and os.path.exists(data_root):
             print(f"[{exp_id}] Contents of {data_root}: {os.listdir(data_root)}", flush=True)
         raise FileNotFoundError(f"Training annotations not found at: {train_csv}")
 
@@ -231,11 +266,14 @@ def train_abpr(
         height=height,
         width=width,
         is_train=True,
+        preload_to_ram=preload_ram,
     )
 
     batch_sampler = DomainBalancedBatchSampler(
         domain_ids=train_dataset.domain_ids,
         batch_size=batch_size,
+        rank=rank,
+        world_size=world_size,
     )
     train_loader = DataLoader(
         train_dataset,
@@ -246,16 +284,22 @@ def train_abpr(
         prefetch_factor=2 if num_workers > 0 else None,
     )
 
-    print(f"[{exp_id}] Dataset Loaded: {len(train_dataset)} training images across Market1501, PA100k, PETA.")
-    print(f"[{exp_id}] Batches per Epoch: {len(batch_sampler)} | DataLoader Workers: {num_workers} (Prefetch: 2)", flush=True)
+    if is_master:
+        print(f"[{exp_id}] Dataset Loaded: {len(train_dataset)} training images across Market1501, PA100k, PETA.")
+        print(f"[{exp_id}] Batches per Epoch per Rank: {len(batch_sampler)} | DataLoader Workers: {num_workers} (Prefetch: 2)", flush=True)
 
     # 2. Model Initialization
     raw_model = build_model(model_name, pretrained=True, num_attributes=40)
     raw_model.to(device)
 
-    # Multi-GPU DataParallel wrapping if 2+ CUDA GPUs available
-    if device.type == "cuda" and num_gpus > 1:
-        model = nn.DataParallel(raw_model)
+    # Wrap with DistributedDataParallel if multi-process DDP, otherwise use raw_model directly (NEVER DataParallel)
+    if is_distributed:
+        model = nn.parallel.DistributedDataParallel(
+            raw_model,
+            device_ids=[local_rank],
+            output_device=local_rank,
+            find_unused_parameters=False,
+        )
     else:
         model = raw_model
 
@@ -284,14 +328,14 @@ def train_abpr(
     best_path = os.path.join(save_dir, f"{exp_id}_best.pth")
 
     if resume_checkpoint and os.path.exists(resume_checkpoint):
-        print(f"[{exp_id}] Resuming from checkpoint: {resume_checkpoint}", flush=True)
+        if is_master:
+            print(f"[{exp_id}] Resuming from checkpoint: {resume_checkpoint}", flush=True)
         ckpt = torch.load(resume_checkpoint, map_location=device)
         raw_state = ckpt["model_state_dict"]
-        # Handle DataParallel prefix compatibility
-        if isinstance(model, nn.DataParallel):
-            model.module.load_state_dict(raw_state)
+        clean_state = {k[7:] if k.startswith("module.") else k: v for k, v in raw_state.items()}
+        if is_distributed:
+            model.module.load_state_dict(clean_state)
         else:
-            clean_state = {k[7:] if k.startswith("module.") else k: v for k, v in raw_state.items()}
             model.load_state_dict(clean_state)
 
         if "optimizer_state_dict" in ckpt:
@@ -299,7 +343,8 @@ def train_abpr(
         start_epoch = ckpt.get("epoch", 1) + 1
         best_madm = ckpt.get("best_madm", 0.0)
         best_metrics = ckpt.get("metrics", {})
-        print(f"[{exp_id}] Resumed successfully. Starting at epoch {start_epoch}, previous best mADM: {best_madm:.6f}", flush=True)
+        if is_master:
+            print(f"[{exp_id}] Resumed successfully. Starting at epoch {start_epoch}, previous best mADM: {best_madm:.6f}", flush=True)
 
     for group in optimizer.param_groups:
         group["lr"] = lr
@@ -314,9 +359,11 @@ def train_abpr(
 
     # 4. Training Loop
     history = []
-    print(f"[{exp_id}] Beginning execution from Epoch {start_epoch} through {epochs}...", flush=True)
+    if is_master:
+        print(f"[{exp_id}] Beginning execution from Epoch {start_epoch} through {epochs}...", flush=True)
 
     for epoch in range(start_epoch, epochs + 1):
+        batch_sampler.set_epoch(epoch)
         t0 = time.time()
         train_stats = train_one_epoch(
             model=model,
@@ -330,28 +377,30 @@ def train_abpr(
             accumulation_steps=accumulation_steps,
             scaler=scaler,
             log_interval=log_interval,
+            is_master=is_master,
+            world_size=world_size,
         )
         scheduler.step()
         epoch_time = time.time() - t0
 
         curr_lr = optimizer.param_groups[0]["lr"]
-        print(
-            f"[{exp_id}] Epoch {epoch:02d}/{epochs:02d} Complete | "
-            f"Train Loss: {train_stats['train_loss']:.4f} (ASL: {train_stats['train_asl']:.4f}, Grp: {train_stats['train_group']:.4f}) | "
-            f"LR: {curr_lr:.2e} | Duration: {epoch_time:.1f}s ({epoch_time / 60:.1f}m)",
-            flush=True,
-        )
+        if is_master:
+            print(
+                f"[{exp_id}] Epoch {epoch:02d}/{epochs:02d} Complete | "
+                f"Train Loss: {train_stats['train_loss']:.4f} (ASL: {train_stats['train_asl']:.4f}, Grp: {train_stats['train_group']:.4f}) | "
+                f"LR: {curr_lr:.2e} | Duration: {epoch_time:.1f}s ({epoch_time / 60:.1f}m)",
+                flush=True,
+            )
 
         if device.type == "mps":
             torch.mps.empty_cache()
         elif device.type == "cuda":
             torch.cuda.empty_cache()
 
-        # Validation evaluation
-        if epoch % eval_interval == 0 or epoch == epochs:
+        # Validation evaluation on master rank
+        if is_master and (epoch % eval_interval == 0 or epoch == epochs):
             print(f"[{exp_id}] Running full validation evaluation (33,407 gallery, 3,462 queries)...", flush=True)
-            # Evaluate using base model (unwrapped from DataParallel)
-            eval_model = model.module if isinstance(model, nn.DataParallel) else model
+            eval_model = model.module if hasattr(model, "module") else model
             val_metrics = run_full_evaluation(
                 model=eval_model,
                 data_root=data_root,
@@ -377,7 +426,7 @@ def train_abpr(
             )
 
             is_best = current_madm > best_madm
-            raw_save_state = model.module.state_dict() if isinstance(model, nn.DataParallel) else model.state_dict()
+            raw_save_state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
 
             if is_best:
                 best_madm = current_madm
@@ -437,8 +486,11 @@ def train_abpr(
             with open(log_path, "w", encoding="utf-8") as f:
                 json.dump(history, f, indent=2)
 
-    # Auto package Codabench submission if best checkpoint exists
-    if os.path.exists(best_path):
+        if is_distributed:
+            torch.distributed.barrier()
+
+    # Auto package Codabench submission if best checkpoint exists (master rank)
+    if is_master and os.path.exists(best_path):
         os.makedirs("submissions", exist_ok=True)
         sub_zip = os.path.join("submissions", f"{exp_id}_submission.zip")
         package_submission(
@@ -450,7 +502,9 @@ def train_abpr(
         )
         print(f"[{exp_id}] Auto-packaged Codabench submission: {sub_zip} ({os.path.getsize(sub_zip)/(1024*1024):.2f} MB)", flush=True)
 
-    print(f"[{exp_id}] Training execution finished! Peak Validation mADM: {best_madm:.6f}", flush=True)
+    if is_master:
+        print(f"[{exp_id}] Training execution finished! Peak Validation mADM: {best_madm:.6f}", flush=True)
+    cleanup_distributed()
     return best_metrics
 
 
@@ -483,11 +537,14 @@ if __name__ == "__main__":
     parser.add_argument("--accumulation_steps", type=int, default=1)
     parser.add_argument("--save_dir", type=str, default="checkpoints")
     parser.add_argument("--exp_id", type=str, default="EXP-003")
-    parser.add_argument("--eval_interval", type=int, default=1)
+    parser.add_argument("--eval_interval", type=int, default=2)
     parser.add_argument("--num_workers", type=int, default=None)
     parser.add_argument("--resume", type=str, default=None)
     parser.add_argument("--log_interval", type=int, default=50)
+    parser.add_argument("--no_preload_ram", action="store_true", default=False, help="Disable preloading dataset into RAM")
     args = parser.parse_args()
+
+    preload_ram = not args.no_preload_ram
 
     # If YAML config is specified, load parameters from file
     if args.config and os.path.exists(args.config):
@@ -545,4 +602,5 @@ if __name__ == "__main__":
         num_workers=num_workers,
         resume_checkpoint=args.resume,
         log_interval=args.log_interval,
+        preload_ram=preload_ram,
     )
