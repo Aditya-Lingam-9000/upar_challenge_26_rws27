@@ -436,14 +436,38 @@
 
 ---
 
+### Step 20: Kaggle Dual-T4 Infrastructure Shift, Git Repository Deployment, Dataset Export Protocol, & EXP-003 Master Implementation Plan
+- **Date / Timestamp:** 2026-10-01 18:42
+- **What Was Done:**
+  - Transitioned production training infrastructure from local Apple Silicon M1 Pro to **Kaggle Dual Tesla T4 GPUs (32GB Total VRAM, 30GB CPU RAM)** to massively accelerate multi-epoch convergence on high-resolution ($384 \times 192$) ConvNeXt-Base backbones.
+  - Initialized professional Git repository on branch `main` linked to official private remote:
+    - Remote URL: [`https://github.com/Aditya-Lingam-9000/upar_challenge_26_rws27`](https://github.com/Aditya-Lingam-9000/upar_challenge_26_rws27)
+  - Engineered zero-defect `.gitignore` strictly excluding large datasets (`UPAR-Challenge-2027/`, `RWS27_Data/`, `upar_dataset/`, `c2t_net_upar/`), checkpoints (`checkpoints/*.pth`), submission archives (`submissions/*.zip`), virtual environments (`venv/`), OS files, and logs.
+  - Authored production files:
+    - [`requirements.txt`](file:///Users/sama/D/RWS2027/requirements.txt): Pinned dependencies for local and cloud environments.
+    - [`README.md`](file:///Users/sama/D/RWS2027/README.md): Publication-grade documentation detailing WACV 2027 challenge metrics, current #9 standing, and execution instructions.
+    - [`configs/exp003_convnext_base_kaggle.yaml`](file:///Users/sama/D/RWS2027/configs/exp003_convnext_base_kaggle.yaml): Master hyperparameter configuration for Kaggle Dual-T4 training.
+  - Successfully committed initial framework (`commit af8fc56`, 34 files, 8,705 lines) and pushed directly to `origin/main` on GitHub.
+  - Authored extensive, lengthy master implementation plan in [`docs/12_exp_003_convnext_base_dual_gpu_implementation_plan.md`](file:///Users/sama/D/RWS2027/docs/12_exp_003_convnext_base_dual_gpu_implementation_plan.md) covering ConvNeXt-Base LayerNorm domain invariance, $384 \times 192$ spatial resolution, dual T4 multi-GPU partitioning, strictly zero-tqdm continuous stdout logging, and vectorized inference.
+  - Formulated Kaggle dataset export protocol for `UPAR-Challenge-2027/data/` (1.2 GB).
+  - Strictly respected user constraint: no next-phase training code executed yet.
+- **What Changed / Created:**
+  - Created [`.gitignore`](file:///Users/sama/D/RWS2027/.gitignore), [`requirements.txt`](file:///Users/sama/D/RWS2027/requirements.txt), [`README.md`](file:///Users/sama/D/RWS2027/README.md), [`configs/exp003_convnext_base_kaggle.yaml`](file:///Users/sama/D/RWS2027/configs/exp003_convnext_base_kaggle.yaml).
+  - Created [`docs/12_exp_003_convnext_base_dual_gpu_implementation_plan.md`](file:///Users/sama/D/RWS2027/docs/12_exp_003_convnext_base_dual_gpu_implementation_plan.md).
+  - Initialized Git repository and pushed to GitHub remote `origin/main`.
+- **Why It Changed / Rationale:**
+  - Establishes clean version control, isolates code from raw data, and pre-configures high-throughput distributed training on Kaggle to break the $0.6280$ ceiling.
+
+---
+
 ## Next Steps Roadmap
-1. **Forensic Analysis Complete:**
-   - Completed extensive investigation of the $0.5293 \to 0.4041$ domain gap for `EXP-002` (Submission #954280) and documented findings in [`reports/EXP-002_COMPREHENSIVE_ANALYSIS_AND_SERVER_BENCHMARK_REPORT.md`](file:///Users/sama/D/RWS2027/reports/EXP-002_COMPREHENSIVE_ANALYSIS_AND_SERVER_BENCHMARK_REPORT.md).
-2. **Strategic Architectural Plan for `EXP-003` (To Beat 1st Place `MaxwellEQ` at `0.6280`):**
-   - **Backbone Shift:** Transition from ResNet-50 (25M params, BatchNorm) to **ConvNeXt-Base (88M params, LayerNorm)**. Because LayerNorm has zero running statistics, it is fundamentally invariant to camera domain shift, directly solving the $-0.1252$ covariate shift.
-   - **High-Resolution Input:** Scale from $256 \times 128$ to **$384 \times 192$** ($+125\%$ spatial detail) to preserve fine-grained accessories.
-   - **Inference Enhancements:** Test-Time Augmentation (TTA: horizontal flip averaging) and logit temperature calibration to sharpen continuous L1 distance margins.
-3. **Execution Protocol:**
-   - Await explicit user authorization before creating or modifying any code or starting `EXP-003` training (strictly obeying user directive: *"dont modify any other codes or files"* and *"dont start what is next now"*).
+1. **Upload Kaggle Dataset:**
+   - Package `UPAR-Challenge-2027/data` into `upar-challenge-2027-data.zip` (1.2 GB) and upload as private dataset on Kaggle.
+2. **Execute EXP-003 on Kaggle (Dual Tesla T4):**
+   - Ingest GitHub repository via PAT single-cell clone/pull.
+   - Run 30-epoch ConvNeXt-Base ($384 \times 192$) training via headless "Save Version".
+   - Download `EXP-003_best.pth` and `EXP-003_submission.zip` to local machine.
+3. **Submit EXP-003 to Codabench:**
+   - Upload package to Codabench Competition #18196 to claim SOTA #1 ($\ge 0.6300 - 0.6500\text{ mADM}$).
 
 
