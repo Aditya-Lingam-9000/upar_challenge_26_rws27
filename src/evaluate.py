@@ -24,7 +24,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from src.dataset import Task2RetrievalEvalData, UPARDataset, get_default_transforms
+from src.dataset import Task2RetrievalEvalData, UPARDataset, get_default_transforms, resolve_data_root
 from src.metrics import compute_par_metrics, compute_retrieval_metrics
 from src.models import build_model
 
@@ -116,6 +116,7 @@ def run_full_evaluation(
     use_fp16: bool = True,
 ) -> dict[str, float]:
     """Run full validation evaluation on all 33,407 gallery images and 3,462 queries."""
+    data_root = resolve_data_root(data_root)
     val_csv = os.path.join(data_root, "annotations", "val.csv")
     val_dataset = UPARDataset(
         csv_path=val_csv,

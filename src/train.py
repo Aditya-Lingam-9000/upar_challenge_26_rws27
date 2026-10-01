@@ -31,7 +31,7 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 
-from src.dataset import DomainBalancedBatchSampler, UPARDataset
+from src.dataset import DomainBalancedBatchSampler, UPARDataset, resolve_data_root
 from src.evaluate import get_device, run_full_evaluation
 from src.losses import CombinedABPRLoss
 from src.models import build_model
@@ -200,8 +200,16 @@ def train_abpr(
             num_workers = min(4 * max(num_gpus, 1), 8)
 
     # 1. Dataset & Loaders
+    resolved_root = resolve_data_root(data_root)
+    if resolved_root != data_root:
+        print(f"[{exp_id}] Auto-detected & resolved true dataset root: '{resolved_root}' (original: '{data_root}')", flush=True)
+        data_root = resolved_root
+
     train_csv = os.path.join(data_root, "annotations", "train.csv")
     if not os.path.exists(train_csv):
+        # Print diagnostic directory contents if missing
+        if os.path.exists(data_root):
+            print(f"[{exp_id}] Contents of {data_root}: {os.listdir(data_root)}", flush=True)
         raise FileNotFoundError(f"Training annotations not found at: {train_csv}")
 
     train_dataset = UPARDataset(

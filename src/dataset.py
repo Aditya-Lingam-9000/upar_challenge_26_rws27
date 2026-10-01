@@ -44,6 +44,57 @@ DOMAIN_NAME_TO_ID = {
 }
 
 
+def resolve_data_root(data_root: str) -> str:
+    """Intelligently resolve the true root directory containing UPAR annotations and image folders.
+
+    Handles arbitrary nesting from Kaggle uploads (e.g., dataset/data/, dataset/UPAR-Challenge-2027/data/, etc.).
+    """
+    data_root = os.path.abspath(os.path.expanduser(data_root))
+
+    # 1. Direct check
+    if os.path.exists(os.path.join(data_root, "annotations", "train.csv")):
+        return data_root
+
+    # 2. Check common subdirectories
+    direct_candidates = [
+        os.path.join(data_root, "data"),
+        os.path.join(data_root, "UPAR-Challenge-2027", "data"),
+        os.path.join(data_root, "upar-challenge-2027-data", "data"),
+    ]
+    for cand in direct_candidates:
+        if os.path.exists(os.path.join(cand, "annotations", "train.csv")):
+            return cand
+
+    # 3. Check all subdirectories of data_root
+    if os.path.exists(data_root):
+        try:
+            for entry in os.listdir(data_root):
+                subpath = os.path.join(data_root, entry)
+                if os.path.isdir(subpath):
+                    if os.path.exists(os.path.join(subpath, "annotations", "train.csv")):
+                        return subpath
+                    sub_data = os.path.join(subpath, "data")
+                    if os.path.exists(os.path.join(sub_data, "annotations", "train.csv")):
+                        return sub_data
+        except Exception:
+            pass
+
+    # 4. Deep search: walk looking for 'train.csv' inside an 'annotations' directory
+    if os.path.exists(data_root):
+        for root, dirs, files in os.walk(data_root):
+            if "train.csv" in files and os.path.basename(root) == "annotations":
+                return os.path.dirname(root)
+
+    # 5. Check Kaggle input root fallback
+    kaggle_input = "/kaggle/input"
+    if os.path.exists(kaggle_input):
+        for root, dirs, files in os.walk(kaggle_input):
+            if "train.csv" in files and os.path.basename(root) == "annotations":
+                return os.path.dirname(root)
+
+    return data_root
+
+
 def get_default_transforms(
     height: int = 256,
     width: int = 128,
