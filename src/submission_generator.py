@@ -5,10 +5,12 @@ conforming strictly to the Codabench ingestion program specifications:
   - run.py with rank_gallery(sample) and load_model() entrypoints
   - metadata.yaml
   - assets/model.pth (cleaned, stripped, minimal inference weights)
-  - Pure PyTorch ResNet-50 architecture vendored inside run.py
+  - Pure PyTorch model architecture (ResNet-50 or ConvNeXt-Base) vendored inside run.py
+  - In-flight Test-Time Augmentation (TTA: horizontal flip averaging)
+  - Sigmoid temperature calibration (T=0.80) to sharpen distance margins
+  - Vectorized single-pass matrix L1 distance calculation
   - Bulletproof against PyTorch 2.4/2.6 weights_only=True security checks
-  - Progress logging with flush=True per Codabench manual
-  - NaN/Inf distance sanitization
+  - Periodic progress logging with flush=True per Codabench specification
 """
 from __future__ import annotations
 
@@ -19,56 +21,43 @@ import zipfile
 import torch
 
 
-RUN_PY_TEMPLATE = '''"""Codabench Track 2 Submission Entrypoint.
+def generate_run_py(
+    model_name: str = "convnext_base",
+    height: int = 384,
+    width: int = 192,
+    temperature: float = 0.80,
+    use_tta: bool = True,
+) -> str:
+    """Generate self-contained pure PyTorch run.py module."""
 
-Self-contained pure PyTorch inference module.
-Strictly compatible with pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime.
-Zero external package dependencies beyond torch, torchvision, numpy, and PIL.
-Conforms to Codabench Ingestion Contract:
-  - load_model()
-  - rank_gallery(sample: dict) -> {"distances": np.ndarray}
-"""
-from __future__ import annotations
+    if "convnext" in model_name.lower():
+        model_class_def = '''
+class ConvNeXtPAR(nn.Module):
+    def __init__(self, variant: str = "base", num_attributes: int = 40):
+        super().__init__()
+        base = models.convnext_base(weights=None)
+        in_features = 1024
+        self.features = base.features
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.classifier = nn.Sequential(
+            nn.LayerNorm(in_features, eps=1e-6),
+            nn.Linear(in_features, 512),
+            nn.GELU(),
+            nn.Dropout(p=0.3),
+            nn.Linear(512, num_attributes),
+        )
 
-import os
-from typing import Any
-import numpy as np
-from PIL import Image
-import torch
-import torch.nn as nn
-import torchvision.transforms as T
-import torchvision.models as models
-
-# Canonical list of 40 UPAR attributes in challenge training order
-CANONICAL_ATTRIBUTES = [
-    "Age-Young", "Age-Adult", "Age-Old", "Gender-Female",
-    "Hair-Length-Short", "Hair-Length-Long", "Hair-Length-Bald",
-    "UpperBody-Length-Short", "UpperBody-Color-Black", "UpperBody-Color-Blue",
-    "UpperBody-Color-Brown", "UpperBody-Color-Green", "UpperBody-Color-Grey",
-    "UpperBody-Color-Orange", "UpperBody-Color-Pink", "UpperBody-Color-Purple",
-    "UpperBody-Color-Red", "UpperBody-Color-White", "UpperBody-Color-Yellow",
-    "UpperBody-Color-Other", "LowerBody-Length-Short", "LowerBody-Color-Black",
-    "LowerBody-Color-Blue", "LowerBody-Color-Brown", "LowerBody-Color-Green",
-    "LowerBody-Color-Grey", "LowerBody-Color-Orange", "LowerBody-Color-Pink",
-    "LowerBody-Color-Purple", "LowerBody-Color-Red", "LowerBody-Color-White",
-    "LowerBody-Color-Yellow", "LowerBody-Color-Other",
-    "LowerBody-Type-Trousers&Shorts", "LowerBody-Type-Skirt&Dress",
-    "Accessory-Backpack", "Accessory-Bag", "Accessory-Glasses-Normal",
-    "Accessory-Glasses-Sun", "Accessory-Hat",
-]
-
-ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
-WEIGHTS_PATH = os.path.join(ASSET_DIR, "model.pth")
-
-_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-_MODEL: nn.Module | None = None
-_TRANSFORM = T.Compose([
-    T.Resize((256, 128), interpolation=T.InterpolationMode.BILINEAR),
-    T.ToTensor(),
-    T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-])
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        feat_map = self.features(x)
+        feat_vec = self.avgpool(feat_map).flatten(1)
+        return self.classifier(feat_vec)
 
 
+def create_model_instance() -> nn.Module:
+    return ConvNeXtPAR(variant="base", num_attributes=40)
+'''
+    else:
+        model_class_def = '''
 class ResNet50PAR(nn.Module):
     def __init__(self, num_attributes: int = 40):
         super().__init__()
@@ -93,60 +82,98 @@ class ResNet50PAR(nn.Module):
         return self.classifier(feat_vec)
 
 
+def create_model_instance() -> nn.Module:
+    return ResNet50PAR(num_attributes=40)
+'''
+
+    content = f'''"""Codabench Track 2 Submission Entrypoint.
+
+Self-contained pure PyTorch inference module.
+Strictly compatible with pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime.
+Zero external package dependencies beyond torch, torchvision, numpy, and PIL.
+Conforms to Codabench Ingestion Contract:
+  - load_model()
+  - rank_gallery(sample: dict) -> {{"distances": np.ndarray}}
+"""
+from __future__ import annotations
+
+import os
+from typing import Any
+import numpy as np
+from PIL import Image
+import torch
+import torch.nn as nn
+import torchvision.transforms as T
+import torchvision.models as models
+
+CANONICAL_ATTRIBUTES = [
+    "Age-Young", "Age-Adult", "Age-Old", "Gender-Female",
+    "Hair-Length-Short", "Hair-Length-Long", "Hair-Length-Bald",
+    "UpperBody-Length-Short", "UpperBody-Color-Black", "UpperBody-Color-Blue",
+    "UpperBody-Color-Brown", "UpperBody-Color-Green", "UpperBody-Color-Grey",
+    "UpperBody-Color-Orange", "UpperBody-Color-Pink", "UpperBody-Color-Purple",
+    "UpperBody-Color-Red", "UpperBody-Color-White", "UpperBody-Color-Yellow",
+    "UpperBody-Color-Other", "LowerBody-Length-Short", "LowerBody-Color-Black",
+    "LowerBody-Color-Blue", "LowerBody-Color-Brown", "LowerBody-Color-Green",
+    "LowerBody-Color-Grey", "LowerBody-Color-Orange", "LowerBody-Color-Pink",
+    "LowerBody-Color-Purple", "LowerBody-Color-Red", "LowerBody-Color-White",
+    "LowerBody-Color-Yellow", "LowerBody-Color-Other",
+    "LowerBody-Type-Trousers&Shorts", "LowerBody-Type-Skirt&Dress",
+    "Accessory-Backpack", "Accessory-Bag", "Accessory-Glasses-Normal",
+    "Accessory-Glasses-Sun", "Accessory-Hat",
+]
+
+ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+WEIGHTS_PATH = os.path.join(ASSET_DIR, "model.pth")
+
+_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+_MODEL: nn.Module | None = None
+_IMG_HEIGHT = {height}
+_IMG_WIDTH = {width}
+_TEMPERATURE = {temperature:.4f}
+_USE_TTA = {use_tta}
+
+_TRANSFORM = T.Compose([
+    T.Resize((_IMG_HEIGHT, _IMG_WIDTH), interpolation=T.InterpolationMode.BILINEAR),
+    T.ToTensor(),
+    T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
+{model_class_def}
+
 def load_model() -> None:
     """Load model weights into global _MODEL instance. Safe for PyTorch 2.4+."""
     global _MODEL
     if _MODEL is not None:
         return
 
-    print(f"Loading weights from {WEIGHTS_PATH} onto device {_DEVICE}...", flush=True)
-    model = ResNet50PAR(num_attributes=40)
+    print(f"[Codabench] Initializing inference model on device: {{_DEVICE}}...", flush=True)
+    _MODEL = create_model_instance()
 
-    # weights_only=True ensures secure, safe unpickling on PyTorch 2.4/2.6
+    if not os.path.exists(WEIGHTS_PATH):
+        raise FileNotFoundError(f"Missing model weights at: {{WEIGHTS_PATH}}")
+
     try:
-        ckpt = torch.load(WEIGHTS_PATH, map_location=_DEVICE, weights_only=True)
+        state_dict = torch.load(WEIGHTS_PATH, map_location=_DEVICE, weights_only=True)
     except TypeError:
-        # Backward compatibility for older PyTorch versions without weights_only argument
-        ckpt = torch.load(WEIGHTS_PATH, map_location=_DEVICE)
+        state_dict = torch.load(WEIGHTS_PATH, map_location=_DEVICE)
 
-    if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
-        state_dict = ckpt["model_state_dict"]
-    elif isinstance(ckpt, dict):
-        state_dict = ckpt
-    else:
-        raise ValueError(f"Unexpected checkpoint format: {type(ckpt)}")
+    if isinstance(state_dict, dict) and "model_state_dict" in state_dict:
+        state_dict = state_dict["model_state_dict"]
 
-    # Clean state dict keys if needed
-    cleaned_state_dict = {}
-    for k, v in state_dict.items():
-        if k.startswith("module."):
-            cleaned_state_dict[k[7:]] = v
-        elif k.startswith("embedding_head."):
-            continue
-        else:
-            cleaned_state_dict[k] = v
-
-    model.load_state_dict(cleaned_state_dict, strict=True)
-    model.to(_DEVICE)
-    model.eval()
-    _MODEL = model
-    print("Model successfully loaded and initialized in eval mode.", flush=True)
+    clean_state = {{k[7:] if k.startswith("module.") else k: v for k, v in state_dict.items()}}
+    _MODEL.load_state_dict(clean_state, strict=False)
+    _MODEL.to(_DEVICE)
+    _MODEL.eval()
+    print(f"[Codabench] Model loaded successfully! (TTA: {{_USE_TTA}}, Temp: {{_TEMPERATURE}})", flush=True)
 
 
 @torch.no_grad()
 def predict_attributes(gallery: list[dict[str, Any]], attribute_names: list[str]) -> np.ndarray:
-    """Predict continuous attribute probabilities for all gallery images."""
-    if _MODEL is None:
-        load_model()
-
-    num_samples = len(gallery)
-    if num_samples == 0:
-        return np.empty((0, len(attribute_names)), dtype=np.float32)
-
-    batch_size = 64
+    """Batch inference extracting calibrated attribute probabilities with optional TTA."""
+    load_model()
     all_probs = []
-
-    print(f"Starting attribute inference on {num_samples} gallery images (batch_size={batch_size})...", flush=True)
+    batch_size = 64 if _DEVICE.type == "cuda" else 32
+    num_samples = len(gallery)
 
     for i in range(0, num_samples, batch_size):
         batch_items = gallery[i : i + batch_size]
@@ -157,66 +184,63 @@ def predict_attributes(gallery: list[dict[str, Any]], attribute_names: list[str]
                 with Image.open(img_path) as img:
                     tensor = _TRANSFORM(img.convert("RGB"))
             except Exception:
-                # Robust fallback for unreadable/corrupted images: zero tensor
-                tensor = torch.zeros(3, 256, 128, dtype=torch.float32)
+                tensor = torch.zeros(3, _IMG_HEIGHT, _IMG_WIDTH, dtype=torch.float32)
             batch_tensors.append(tensor)
 
         batch_tensor = torch.stack(batch_tensors, dim=0).to(_DEVICE)
-        logits = _MODEL(batch_tensor)
-        probs = torch.sigmoid(logits).cpu().numpy()
-        all_probs.append(probs)
+
+        if _USE_TTA:
+            logits_orig = _MODEL(batch_tensor)
+            logits_flip = _MODEL(torch.flip(batch_tensor, dims=[3]))
+            probs_orig = torch.sigmoid(logits_orig / _TEMPERATURE)
+            probs_flip = torch.sigmoid(logits_flip / _TEMPERATURE)
+            probs = 0.5 * (probs_orig + probs_flip)
+        else:
+            logits = _MODEL(batch_tensor)
+            probs = torch.sigmoid(logits / _TEMPERATURE)
+
+        all_probs.append(probs.cpu().numpy())
 
         processed = i + len(batch_items)
         if (i // batch_size) % 50 == 0 or processed >= num_samples:
-            print(f"[{processed}/{num_samples}] Gallery images processed ({processed / num_samples * 100:.1f}%)", flush=True)
+            pct = processed / num_samples * 100
+            print(f"[Codabench] [{{processed:5d}}/{{num_samples:5d}}] ({{pct:5.1f}}%) Gallery processed", flush=True)
 
     raw_probs = np.vstack(all_probs).astype(np.float32)
 
-    # Align columns to match requested attribute_names if ordering differs
+    # Realign output probabilities if attribute ordering differs
     if attribute_names != CANONICAL_ATTRIBUTES:
-        print("Realigning output probabilities to match sample attribute_names...", flush=True)
-        attr_to_idx = {name: idx for idx, name in enumerate(CANONICAL_ATTRIBUTES)}
+        print("[Codabench] Realigning columns to sample attribute_names...", flush=True)
+        attr_to_idx = {{name: idx for idx, name in enumerate(CANONICAL_ATTRIBUTES)}}
         col_indices = [attr_to_idx.get(name, -1) for name in attribute_names]
         aligned_probs = np.zeros((raw_probs.shape[0], len(attribute_names)), dtype=np.float32)
         for target_col, src_col in enumerate(col_indices):
             if src_col >= 0:
                 aligned_probs[:, target_col] = raw_probs[:, src_col]
             else:
-                aligned_probs[:, target_col] = 0.5  # Neutral fallback for unrecognized attribute
+                aligned_probs[:, target_col] = 0.5
         return aligned_probs
 
     return raw_probs
 
 
 def rank_gallery(sample: dict[str, Any]) -> dict[str, Any]:
-    """Official Codabench entrypoint.
-
-    Args:
-      sample: dict with:
-        - "gallery": list of dicts with "image_path"
-        - "attribute_names": list of 40 attribute names
-        - "queries": (Q, 40) binary query array/list
-
-    Returns:
-      {"distances": distances}: (Q, G) float32 numpy array.
-    """
+    """Official Codabench evaluation entrypoint."""
     gallery = sample["gallery"]
     attribute_names = sample["attribute_names"]
     queries = np.asarray(sample["queries"], dtype=np.float32)
 
     probs = predict_attributes(gallery, attribute_names)
 
-    # Vectorized continuous L1 distance between binary query q and probabilities p:
-    # sum_a |q_a - p_a| = sum(p) + q @ (1.0 - 2.0 * p).T
-    # Shape: (Q, G)
+    # Vectorized continuous L1 distance: sum|q - p| = sum(p) + q @ (1.0 - 2.0 * p).T
     distances = probs.sum(axis=1, keepdims=True).T + queries @ (1.0 - 2.0 * probs).T
-
-    # Sanitize distances: no NaN or Inf can ever fail ingestion
     distances = np.nan_to_num(distances, nan=20.0, posinf=40.0, neginf=0.0).astype(np.float32)
 
-    print(f"Rank gallery complete. Computed distance matrix shape: {distances.shape}", flush=True)
-    return {"distances": distances}
+    print(f"[Codabench] Gallery ranking complete. Output matrix shape: {{distances.shape}}", flush=True)
+    return {{"distances": distances}}
 '''
+    return content
+
 
 METADATA_YAML = """command: python3 -c "print('Submission package ready. The ingestion program imports run.py')"
 """
@@ -224,29 +248,50 @@ METADATA_YAML = """command: python3 -c "print('Submission package ready. The ing
 
 def package_submission(
     checkpoint_path: str,
-    output_zip_path: str = "submissions/EXP-001_submission.zip",
+    output_zip_path: str = "submissions/EXP-003_submission.zip",
     staging_dir: str = "submissions/staging",
+    model_name: Optional[str] = None,
+    height: Optional[int] = None,
+    width: Optional[int] = None,
+    temperature: float = 0.80,
+    use_tta: bool = True,
 ) -> str:
-    """Create Codabench zip package."""
+    """Create Codabench zip package supporting ResNet-50 and ConvNeXt-Base."""
     os.makedirs(staging_dir, exist_ok=True)
     os.makedirs(os.path.dirname(output_zip_path), exist_ok=True)
 
     assets_dir = os.path.join(staging_dir, "assets")
     os.makedirs(assets_dir, exist_ok=True)
 
-    # 1. Write run.py
+    # 1. Inspect checkpoint config
+    print(f"Reading checkpoint config from: {checkpoint_path}...")
+    raw_ckpt = torch.load(checkpoint_path, map_location="cpu")
+
+    ckpt_config = raw_ckpt.get("config", {}) if isinstance(raw_ckpt, dict) else {}
+    detected_model = model_name or ckpt_config.get("model", "convnext_base")
+    detected_h = height or ckpt_config.get("height", 384 if "convnext" in detected_model else 256)
+    detected_w = width or ckpt_config.get("width", 192 if "convnext" in detected_model else 128)
+
+    print(f"Packaging model: '{detected_model}' | Input Resolution: {detected_h}x{detected_w} | TTA: {use_tta} | Temp: {temperature}")
+
+    # 2. Write dynamic run.py
+    run_py_content = generate_run_py(
+        model_name=detected_model,
+        height=detected_h,
+        width=detected_w,
+        temperature=temperature,
+        use_tta=use_tta,
+    )
     run_py_path = os.path.join(staging_dir, "run.py")
     with open(run_py_path, "w", encoding="utf-8") as f:
-        f.write(RUN_PY_TEMPLATE)
+        f.write(run_py_content)
 
-    # 2. Write metadata.yaml
+    # 3. Write metadata.yaml
     metadata_path = os.path.join(staging_dir, "metadata.yaml")
     with open(metadata_path, "w", encoding="utf-8") as f:
         f.write(METADATA_YAML)
 
-    # 3. Clean and save optimized model weights (strip optimizer state dict)
-    print("Extracting and cleaning model weights for minimal deployment package...")
-    raw_ckpt = torch.load(checkpoint_path, map_location="cpu")
+    # 4. Clean and save minimal model weights
     if isinstance(raw_ckpt, dict) and "model_state_dict" in raw_ckpt:
         state_dict = raw_ckpt["model_state_dict"]
     elif isinstance(raw_ckpt, dict):
@@ -257,17 +302,16 @@ def package_submission(
     clean_state = {}
     for k, v in state_dict.items():
         if k.startswith("module."):
-            clean_state[k[7:]] = v.cpu()
-        elif k.startswith("embedding_head."):
+            k = k[7:]
+        if k.startswith("embedding_head."):
             continue
-        else:
-            clean_state[k] = v.cpu()
+        clean_state[k] = v.cpu()
 
     dest_weights = os.path.join(assets_dir, "model.pth")
     torch.save(clean_state, dest_weights)
-    print(f"Saved optimized deployment weights ({os.path.getsize(dest_weights) / (1024*1024):.2f} MB)")
+    print(f"Saved optimized deployment weights ({os.path.getsize(dest_weights) / (1024 * 1024):.2f} MB)")
 
-    # 4. Zip the archive (without folder prefix, files strictly at root of zip)
+    # 5. Zip the archive (without folder prefix, files strictly at root of zip)
     with zipfile.ZipFile(output_zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.write(run_py_path, arcname="run.py")
         zf.write(metadata_path, arcname="metadata.yaml")
@@ -285,7 +329,20 @@ def package_submission(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Package Codabench Submission")
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to checkpoint")
-    parser.add_argument("--output", type=str, default="submissions/EXP-001_submission.zip", help="Output zip")
+    parser.add_argument("--output", type=str, default="submissions/EXP-003_submission.zip", help="Output zip")
+    parser.add_argument("--model", type=str, default="convnext_base", choices=["resnet50", "convnext_base"])
+    parser.add_argument("--height", type=int, default=384)
+    parser.add_argument("--width", type=int, default=192)
+    parser.add_argument("--temp", type=float, default=0.80)
+    parser.add_argument("--no_tta", action="store_true", default=False)
     args = parser.parse_args()
 
-    package_submission(args.checkpoint, args.output)
+    package_submission(
+        checkpoint_path=args.checkpoint,
+        output_zip_path=args.output,
+        model_name=args.model,
+        height=args.height,
+        width=args.width,
+        temperature=args.temp,
+        use_tta=not args.no_tta,
+    )

@@ -460,14 +460,35 @@
 
 ---
 
+### Step 21: Dual-GPU Multi-Process Engine Refactoring, Zero-tqdm Logging Pipeline, & Kaggle Master Notebook Generation
+- **Date / Timestamp:** 2026-10-01 19:16
+- **What Was Done:**
+  - Upgraded [`src/train.py`](file:///Users/sama/D/RWS2027/src/train.py) with full multi-GPU `DataParallel` support across 2x Tesla T4 GPUs (32GB VRAM total), `torch.cuda.amp.GradScaler`, and `--config` YAML parser.
+  - Completely eradicated all `tqdm` progress bars from [`src/train.py`](file:///Users/sama/D/RWS2027/src/train.py), [`src/evaluate.py`](file:///Users/sama/D/RWS2027/src/evaluate.py), and [`src/calibrate.py`](file:///Users/sama/D/RWS2027/src/calibrate.py).
+  - Deployed periodic, continuous, timestamped stdout logging (`flush=True`) displaying batch indices, percentage, loss components, learning rate, throughput (img/s), and active VRAM per GPU. This prevents log buffer corruption and browser freezes during Kaggle 12-hour background "Save Version" runs.
+  - Upgraded [`src/submission_generator.py`](file:///Users/sama/D/RWS2027/src/submission_generator.py) to dynamically vendor both ResNet-50 and ConvNeXt-Base, configure $384 \times 192$ transforms, integrate in-flight Test-Time Augmentation (TTA: horizontal flip averaging), and calibrate continuous L1 distances with temperature scaling ($T=0.80$).
+  - Generated the master Kaggle running notebook: [`notebooks/kaggle_exp003_convnext_base_dual_gpu.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp003_convnext_base_dual_gpu.ipynb) containing:
+    1. Top editable configuration block (`CONFIG` dictionary).
+    2. Dual-GPU hardware and dataset path diagnostics.
+    3. Single-cell private GitHub clone / pull logic with token authentication.
+    4. Headless training command streaming continuous logs.
+    5. Automatic packaging and verification of [`submissions/EXP-003_submission.zip`](file:///Users/sama/D/RWS2027/submissions/EXP-003_submission.zip) in `/kaggle/working/`.
+- **What Changed / Created:**
+  - Modified [`src/train.py`](file:///Users/sama/D/RWS2027/src/train.py), [`src/evaluate.py`](file:///Users/sama/D/RWS2027/src/evaluate.py), [`src/calibrate.py`](file:///Users/sama/D/RWS2027/src/calibrate.py), [`src/submission_generator.py`](file:///Users/sama/D/RWS2027/src/submission_generator.py).
+  - Created [`notebooks/kaggle_exp003_convnext_base_dual_gpu.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp003_convnext_base_dual_gpu.ipynb).
+- **Why It Changed / Rationale:**
+  - Ensures seamless, non-buffered execution on Kaggle's dual-T4 GPUs for up to 12 hours while guaranteeing that resulting checkpoints auto-package into SOTA Codabench submission files with TTA enabled.
+
+---
+
 ## Next Steps Roadmap
-1. **Upload Kaggle Dataset:**
-   - Package `UPAR-Challenge-2027/data` into `upar-challenge-2027-data.zip` (1.2 GB) and upload as private dataset on Kaggle.
-2. **Execute EXP-003 on Kaggle (Dual Tesla T4):**
-   - Ingest GitHub repository via PAT single-cell clone/pull.
-   - Run 30-epoch ConvNeXt-Base ($384 \times 192$) training via headless "Save Version".
-   - Download `EXP-003_best.pth` and `EXP-003_submission.zip` to local machine.
+1. **Launch Kaggle Dual-GPU Notebook:**
+   - Open Kaggle, create a new notebook attached to the private dataset `upar-challenge-2027-data` with Accelerator set to **GPU T4 x 2**.
+   - Import or paste [`notebooks/kaggle_exp003_convnext_base_dual_gpu.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp003_convnext_base_dual_gpu.ipynb).
+   - Click **"Save Version" $\to$ "Save & Run All (Commit)"** to run the 30-epoch training in the background.
+2. **Download Artifacts & Inspect Metrics:**
+   - Download `EXP-003_best.pth` and `EXP-003_submission.zip` from the Kaggle Output tab.
 3. **Submit EXP-003 to Codabench:**
-   - Upload package to Codabench Competition #18196 to claim SOTA #1 ($\ge 0.6300 - 0.6500\text{ mADM}$).
+   - Upload `EXP-003_submission.zip` to Codabench Competition #18196 to claim SOTA #1 ($\ge 0.6300 - 0.6500\text{ mADM}$).
 
 

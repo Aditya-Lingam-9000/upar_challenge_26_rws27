@@ -31,7 +31,6 @@ import torch.nn as nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 
 from src.dataset import DomainBalancedBatchSampler, UPARDataset
 from src.evaluate import get_device, run_full_evaluation
@@ -140,8 +139,9 @@ def run_calibration(
         t0_train = time.time()
         batch_count = 0
 
-        pbar = tqdm(train_loader, total=batches_per_epoch, desc=f"Epoch {epoch}/{epochs} [Train]")
-        for images, labels, _, _ in pbar:
+        for images, labels, _, _ in train_loader:
+            if batch_count >= batches_per_epoch:
+                break
             images = images.to(device)
             labels = labels.to(device)
             bs = images.size(0)

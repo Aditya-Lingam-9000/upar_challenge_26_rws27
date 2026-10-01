@@ -23,7 +23,6 @@ from typing import Optional
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 
 from src.dataset import Task2RetrievalEvalData, UPARDataset, get_default_transforms
 from src.metrics import compute_par_metrics, compute_retrieval_metrics
@@ -32,10 +31,10 @@ from src.models import build_model
 
 def get_device() -> torch.device:
     """Select best available device (MPS on macOS, CUDA on Linux, CPU fallback)."""
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    elif torch.cuda.is_available():
+    if torch.cuda.is_available():
         return torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        return torch.device("mps")
     return torch.device("cpu")
 
 
@@ -45,12 +44,18 @@ def extract_gallery_probabilities(
     val_loader: DataLoader,
     device: torch.device,
     use_fp16: bool = True,
+    log_interval: int = 50,
 ) -> np.ndarray:
     """Extract continuous attribute prediction probabilities for all gallery images."""
     model.eval()
     all_probs = []
+    total_batches = len(val_loader)
+    total_samples = len(val_loader.dataset)
+    processed = 0
+    t_start = time.time()
 
-    for images, _, _, _ in tqdm(val_loader, desc="Gallery Inference", leave=False):
+    for batch_idx, (images, _, _, _) in enumerate(val_loader):
+        batch_size = images.size(0)
         images = images.to(device)
         if use_fp16 and device.type in ["mps", "cuda"]:
             with torch.autocast(device_type=device.type, dtype=torch.float16):
@@ -59,6 +64,14 @@ def extract_gallery_probabilities(
             logits = model(images)
         probs = torch.sigmoid(logits.float()).cpu().numpy()
         all_probs.append(probs)
+        processed += batch_size
+
+        if (batch_idx + 1) % log_interval == 0 or (batch_idx + 1) == total_batches:
+            elapsed = time.time() - t_start
+            speed = processed / max(elapsed, 1e-4)
+            pct = (batch_idx + 1) / total_batches * 100
+            print(f"[Evaluation] Gallery Extraction: [{processed:5d}/{total_samples:5d}] ({pct:5.1f}%) | "
+                  f"Batch [{batch_idx + 1:3d}/{total_batches:3d}] | Speed: {speed:5.1f} img/s", flush=True)
 
     return np.vstack(all_probs)
 
