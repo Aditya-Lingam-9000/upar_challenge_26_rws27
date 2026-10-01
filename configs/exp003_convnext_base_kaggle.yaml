@@ -22,9 +22,9 @@ model:
   dropout_p: 0.3
 
 # Training Hyperparameters
-batch_size: 64                     # 32 per T4 GPU (64 effective per step)
-val_batch_size: 128                # 64 per T4 GPU
-epochs: 30
+batch_size: 64                     # 64 per T4 GPU (128 global effective per step)
+val_batch_size: 128                # 128 per T4 GPU
+epochs: 25
 learning_rate: 1.0e-4              # Initial learning rate
 min_lr: 1.0e-6                     # Cosine annealing minimum
 weight_decay: 1.0e-4

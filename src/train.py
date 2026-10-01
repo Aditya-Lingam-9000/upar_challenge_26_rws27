@@ -19,7 +19,12 @@ import json
 import os
 import sys
 import time
+import warnings
 from typing import Optional
+
+# Filter benign framework stride and unused parameter warnings
+warnings.filterwarnings("ignore", message=".*Grad strides do not match bucket view strides.*")
+warnings.filterwarnings("ignore", message=".*find_unused_parameters.*")
 
 # Ensure project root is in python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -355,7 +360,7 @@ def train_abpr(
             raw_model,
             device_ids=[local_rank],
             output_device=local_rank,
-            find_unused_parameters=True,
+            find_unused_parameters=False,
         )
     else:
         model = raw_model
@@ -585,7 +590,7 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=str, default=None, help="Path to YAML configuration file")
     parser.add_argument("--model", type=str, default="convnext_base", choices=["resnet50", "convnext_tiny", "convnext_base"])
     parser.add_argument("--data_root", type=str, default="UPAR-Challenge-2027/data")
-    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--epochs", type=int, default=25)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--val_batch_size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-4)
