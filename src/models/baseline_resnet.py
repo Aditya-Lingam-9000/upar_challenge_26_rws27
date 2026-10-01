@@ -41,12 +41,6 @@ class ResNet50PAR(nn.Module):
         in_channels = 2048  # ResNet-50 layer4 output channels
         self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
 
-        # Semantic embedding branch (L2 normalized feature vector)
-        self.embedding_head = nn.Sequential(
-            nn.Linear(in_channels, embedding_dim, bias=False),
-            nn.BatchNorm1d(embedding_dim),
-        )
-
         # Attribute classification head
         self.classifier = nn.Sequential(
             nn.Linear(in_channels, 512),
@@ -57,11 +51,10 @@ class ResNet50PAR(nn.Module):
         )
 
     def extract_features(self, x: torch.Tensor) -> torch.Tensor:
-        """Extract L2-normalized 512-dim embedding."""
+        """Extract L2-normalized feature vector."""
         feat_map = self.conv_trunk(x)
         feat_vec = self.global_pool(feat_map).flatten(1)
-        emb = self.embedding_head(feat_vec)
-        return F.normalize(emb, p=2, dim=-1)
+        return F.normalize(feat_vec, p=2, dim=-1)
 
     def forward(
         self,
@@ -74,7 +67,7 @@ class ResNet50PAR(nn.Module):
         logits = self.classifier(feat_vec)
 
         if return_embedding:
-            emb = F.normalize(self.embedding_head(feat_vec), p=2, dim=-1)
+            emb = F.normalize(feat_vec, p=2, dim=-1)
             return logits, emb
 
         return logits

@@ -8,7 +8,7 @@ import torchvision.models as models
 
 
 class ConvNeXtPAR(nn.Module):
-    """ConvNeXt-based Multi-Label Attribute Classifier and Semantic Feature Extractor.
+    """ConvNeXt-based Multi-Label Attribute Classifier.
 
     Supports 'tiny' (768-dim) and 'base' (1024-dim) variants.
     """
@@ -37,12 +37,6 @@ class ConvNeXtPAR(nn.Module):
         self.features = base.features
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
 
-        # Semantic embedding branch
-        self.embedding_head = nn.Sequential(
-            nn.LayerNorm(in_features, eps=1e-6),
-            nn.Linear(in_features, embedding_dim, bias=False),
-        )
-
         # Attribute classifier head
         self.classifier = nn.Sequential(
             nn.LayerNorm(in_features, eps=1e-6),
@@ -55,8 +49,7 @@ class ConvNeXtPAR(nn.Module):
     def extract_features(self, x: torch.Tensor) -> torch.Tensor:
         feat_map = self.features(x)
         feat_vec = self.avgpool(feat_map).flatten(1)
-        emb = self.embedding_head(feat_vec)
-        return F.normalize(emb, p=2, dim=-1)
+        return F.normalize(feat_vec, p=2, dim=-1)
 
     def forward(
         self,
@@ -69,7 +62,7 @@ class ConvNeXtPAR(nn.Module):
         logits = self.classifier(feat_vec)
 
         if return_embedding:
-            emb = F.normalize(self.embedding_head(feat_vec), p=2, dim=-1)
+            emb = F.normalize(feat_vec, p=2, dim=-1)
             return logits, emb
 
         return logits
