@@ -1,0 +1,56 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments & Virtual Envs
+venv/
+env/
+ENV/
+.venv/
+.env
+
+# Large Raw Data & Datasets (Uploaded separately as Kaggle Datasets)
+RWS27_Data/
+UPAR-Challenge-2027/
+upar_dataset/
+upar_challenge_2024/
+c2t_net_upar/
+data/
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# Model Checkpoints, Weights & Outputs (Saved to local/remote storage)
+checkpoints/
+*.pth
+*.pt
+*.bin
+*.onnx
+
+# Competition Submission Archives
+submissions/
+*.submission.zip
+
+# Logs & Temporary Files
+*.log
+train.log
+scratch/
+.system_generated/
+wandb/
+.pytest_cache/
+
+# OS & Editor Specific Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo

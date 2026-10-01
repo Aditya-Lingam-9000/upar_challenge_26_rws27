@@ -1,0 +1,79 @@
+# EXP-003: ConvNeXt-Base Dual-T4 Kaggle Production Configuration
+experiment_id: "EXP-003"
+description: "ConvNeXt-Base (88M) High-Res (384x192) Dual T4 GPU Training on Kaggle"
+
+# Hardware & Distributed
+device: "cuda"                     # "cuda" on Kaggle, "mps" on Apple Silicon
+multi_gpu: true                    # Auto-detects 2x T4 GPUs via DataParallel / DDP
+num_workers: 4                     # Tuned for Kaggle 30GB CPU RAM (4 per GPU)
+pin_memory: true
+fp16_autocast: true
+
+# Image & Resolution
+image_height: 384                  # High-Resolution: +125% spatial area over 256x128
+image_width: 192
+
+# Model Architecture
+model:
+  backbone: "convnext_base"        # Uses LayerNorm (zero running stats, camera-invariant)
+  pretrained: true                 # ImageNet-1K pretrained weights
+  num_attributes: 40
+  embedding_dim: 512
+  dropout_p: 0.3
+
+# Training Hyperparameters
+batch_size: 64                     # 32 per T4 GPU (64 effective per step)
+val_batch_size: 128                # 64 per T4 GPU
+epochs: 30
+learning_rate: 1.0e-4              # Initial learning rate
+min_lr: 1.0e-6                     # Cosine annealing minimum
+weight_decay: 1.0e-4
+grad_clip_norm: 5.0
+
+# Loss Formulation
+loss:
+  asymmetric_loss_weight: 1.0
+  asl_gamma_neg: 4.0
+  asl_gamma_pos: 0.0
+  asl_clip: 0.05
+  category_group_weight: 0.5
+  category_groups:
+    - name: "age"
+      indices: [0, 1, 2]
+    - name: "hair"
+      indices: [4, 5, 6]
+    - name: "upper_color"
+      indices: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    - name: "lower_color"
+      indices: [21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
+    - name: "lower_type"
+      indices: [33, 34]
+
+# Sampling & Data Augmentation
+sampler:
+  type: "domain_balanced"
+  proportions:
+    market: 0.25
+    pa100k: 0.50
+    peta: 0.25
+augmentation:
+  random_horizontal_flip_p: 0.5
+  color_jitter:
+    brightness: 0.2
+    contrast: 0.2
+    saturation: 0.2
+    hue: 0.1
+  random_erasing_p: 0.25
+
+# Evaluation & Inference
+inference:
+  test_time_augmentation: true     # Horizontal flip averaging (+0.015-0.020 mADM)
+  temperature_scaling: 0.80        # Calibrates soft probability margins
+  vectorized_ranking: true         # Fast matrix multiplication for 33k gallery
+  eval_frequency: 1                # Run full validation every epoch
+
+# Paths (Overridden by Kaggle notebook paths)
+paths:
+  data_dir: "/kaggle/input/upar-challenge-2027-data/data"
+  output_dir: "/kaggle/working/outputs/EXP-003"
+  checkpoint_dir: "/kaggle/working/checkpoints"

@@ -1,0 +1,246 @@
+1. Overview:
+
+Real-World Surveillance: Applications and Challenges, 7th
+@ WACV2027
+UPAR Challenge Track 2: Attribute-based Person Retrieval
+
+Track 1 of the UPAR Challenge at the Real-World Surveillance workshop (RWS), WACV 2027.
+
+Everything about this track lives on this Codabench page: task, data, evaluation, submission format, schedule and rules. Announcements go out by email to registered participants.
+
+See also the workshop website and Tasks 2 and 3 of the UPAR Challenge. The RWS workshop welcomes both regular submissions on the topic of real-world surveillance and submissions as part of the Challenge:
+
+RWS Workshop
+Challenge Task 1: Pedestrian Attribute Recognition
+Challenge Task 2: Attribute-Based Person Retrieval
+Challenge Task 3: Human Pose Estimation
+The task
+Find people by description. A query is not an image but a set of attributes, such as adult, female, long hair, red short-sleeved top, black trousers, backpack. For every query, rank a gallery of pedestrian images so that the people matching the description come first.
+
+Queries use the 40 binary UPAR attributes: age, gender, hair length, upper and lower body clothing length, colour and type, and accessories. The challenge builds on the UPAR dataset, which unifies the annotations of several public pedestrian datasets. The gallery comes from a hidden domain your model has never seen, so the method has to generalize.
+
+You submit code, not rankings. Your model runs inside the evaluation container on a hidden gallery, and only the resulting metrics are published.
+
+Getting started
+Read the Data page and download the training data and example submission. Starter Kit
+Take the example submission as your template. It shows the functions the platform calls.
+Put your model and weights into the submission folder, zip the contents of the folder so run.py is at the archive root, and upload it under My Submissions.
+See the Submission page for the API your run.py must expose, and the Evaluation page for the metrics.
+
+Submissions run in pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime (Python 3.11, torch 2.4.1, torchvision, numpy, Pillow) with no network access. Ship everything your model needs inside the zip.
+
+Code submission and winner selection
+After the challenge deadline, participating teams are required to submit their code, models, and a short description of their method by Oct 30, 2026, AoE. A panel of experts will review the entries. The executable/source code should include trained models, training code, and necessary parameters to ensure reproducibility. Teams that do not comply are removed from the final ranking.
+
+Note: Submitted codes will not be saved on the evaluation servers. Final submission codebases provided to the organizers will be used only for reproducibility checks and winner verification, and will not be shared publicly or with other participants at any stage.
+
+Paper submission
+We strongly encourage all challenge participants to submit a technical paper to the RWS workshop. Your paper should detail your methodology, experiments, and results on the challenge dataset. Accepted papers will be presented at the workshop and published in the WACV workshop proceedings. This is an excellent opportunity to share your insights with the community and gain visibility for your work.
+
+Submission Guidelines:
+
+Format: WACV format
+Submission System: Openreview
+Challenge paper deadline: Oct 23, 2026, AoE
+Schedule
+Date	Event
+Sep 21, 2026	Challenge opens, training data available
+Oct 21, 2026, AoE	Challenge submission deadline
+Oct 23, 2026, AoE	Paper submission deadline
+Oct 30, 2026, AoE	Code submission deadline, code verification starts
+Jan 4/5, 2027	RWS Workshop at WACV 2027
+Citation
+@inproceedings{specker2023upar,
+  title={UPAR: Unified Pedestrian Attribute Recognition and Person Retrieval},
+  author={Specker, Andreas and Cormier, Mickael and Beyerer, Jurgen},
+  booktitle={Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision},
+  year={2023}
+}
+
+@inproceedings{cormier2023upar,
+  title={UPAR challenge: pedestrian attribute recognition and attribute-based person retrieval-dataset, design, and results},
+  author={Cormier, Mickael and Specker, Andreas and Jacques, Julio CS and Florin, Lucas and Metzler, J{\"u}rgen and Moeslund, Thomas B and Nasrollahi, Kamal and Escalera, Sergio and Beyerer, J{\"u}rgen},
+  booktitle={2023 IEEE/CVF Winter Conference on Applications of Computer Vision Workshops (WACVW)},
+  pages={166--175},
+  year={2023},
+  organization={IEEE}
+}
+
+@inproceedings{cormier2024upar,
+  title={Upar challenge 2024: Pedestrian attribute recognition and attribute-based person retrieval-dataset, design, and results},
+  author={Cormier, Mickael and Specker, Andreas and Junior, Julio and CS, Jacques and Moritz, Lennart and Metzler, J{\"u}rgen and Moeslund, Thomas B and Nasrollahi, Kamal and Escalera, Sergio and Beyerer, J{\"u}rgen},
+  booktitle={Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision},
+  pages={359--367},
+  year={2024}
+}
+
+
+2. Data:
+
+Training data
+Training data and starter kit can be found here: Starter Kit The use of external data to fine-tune PAR is not permitted. Pre-trained models trained on common datasets such as ImageNet, or foundation models/VLMs that were not specifically trained for PAR, are permitted.
+
+Attributes
+40 binary attributes, in this exact order. A query is a vector of 40 values, 1 = the person has the attribute, 0 = the person does not.
+
+ 0 Age-Young                  20 LowerBody-Length-Short
+ 1 Age-Adult                  21 LowerBody-Color-Black
+ 2 Age-Old                    22 LowerBody-Color-Blue
+ 3 Gender-Female              23 LowerBody-Color-Brown
+ 4 Hair-Length-Short          24 LowerBody-Color-Green
+ 5 Hair-Length-Long           25 LowerBody-Color-Grey
+ 6 Hair-Length-Bald           26 LowerBody-Color-Orange
+ 7 UpperBody-Length-Short     27 LowerBody-Color-Pink
+ 8 UpperBody-Color-Black      28 LowerBody-Color-Purple
+ 9 UpperBody-Color-Blue       29 LowerBody-Color-Red
+10 UpperBody-Color-Brown      30 LowerBody-Color-White
+11 UpperBody-Color-Green      31 LowerBody-Color-Yellow
+12 UpperBody-Color-Grey       32 LowerBody-Color-Other
+13 UpperBody-Color-Orange     33 LowerBody-Type-Trousers&Shorts
+14 UpperBody-Color-Pink       34 LowerBody-Type-Skirt&Dress
+15 UpperBody-Color-Purple     35 Accessory-Backpack
+16 UpperBody-Color-Red        36 Accessory-Bag
+17 UpperBody-Color-White      37 Accessory-Glasses-Normal
+18 UpperBody-Color-Yellow     38 Accessory-Glasses-Sun
+19 UpperBody-Color-Other      39 Accessory-Hat
+Test data
+The test set is hidden. It is mounted into your container, read-only, with this layout:
+
+input_data/
+├── queries.csv     one query per line: 40 comma-separated 0/1 values
+├── images.csv      the gallery: one image path per line, no labels
+├── images/         the image files, at the paths listed in images.csv
+│   └── <dataset>/...
+└── task.json       attribute names, number of queries and gallery images
+The queries are complete descriptions: every query is the full attribute vector of at least one person in the gallery. A gallery image is a correct match for a query if all 40 of its attributes equal the query. Several images can match the same query, and an image never matches two queries.
+
+The gallery images are pedestrian crops of varying size and aspect ratio.
+
+You do not have to parse these files yourself: the ingestion program does it and hands your code the queries and the gallery in one sample dict. See the Submission page.
+
+
+3. Evaluation:
+
+The protocol and metrics are those of the previous UPAR challenge edition (WACV 2024). The scoring program reproduces the original evaluation script.
+
+What is evaluated
+For every query your model returns a ranking of the whole gallery, best match first. A gallery image is a correct match for a query if all of its 40 attributes equal the query.
+
+Metrics
+Leaderboard	Meaning
+mADM	mean average degree of match - the ranking metric
+mAP	mean average precision over the queries
+Rank-1	share of queries whose top result is a correct match
+Rank-5	share of queries with a correct match among the top 5
+Rank-10	share of queries with a correct match among the top 10
+mINP	mean inverse negative penalty
+For one query with R correct matches in the gallery, at the ranks r_1 < r_2 < ... < r_R of your ranking:
+
+AP  = ( 1/r_1 + 2/r_2 + ... + R/r_R ) / R
+INP = R / r_R
+AP rewards placing all correct matches early. INP looks only at the hardest one: it is 1 if the last correct match directly follows the others, and falls towards 0 the deeper you have to search for it. mAP and mINP are the means over the queries, Rank-k is the share of queries with r_1 <= k.
+
+mADM - the ranking metric
+AP is all-or-nothing: an image that differs from the query in a single attribute counts exactly like one that differs in twenty. The average degree of match (ADM) keeps the structure of AP but credits near misses.
+
+For a query, the degree of match of a gallery image is the share of the 40 attributes on which image and query agree. It is normalized per query, so that an average gallery image earns nothing and a perfect match earns 1:
+
+dom(g)  = (number of attributes where image g equals the query) / 40
+ndom(g) = max( 0, (dom(g) - mean dom) / (max dom - mean dom) )      mean, max over the gallery
+With g_1, g_2, ... your ranking and r_1 < ... < r_R again the ranks of the correct matches:
+
+ADM = ( 1/R ) * sum over k of  ( ndom(g_1) + ... + ndom(g_{r_k}) ) / r_k
+So at the rank of every correct match, AP asks which share of the images ranked so far is correct, and ADM asks how well do the images ranked so far match the query on average. A ranking that places similar-looking people ahead of unrelated ones scores higher than one that does not, even if both find the exact matches at the same ranks. A perfect ranking reaches 1. mADM is the mean over the queries.
+
+Reference: A. Specker, J. Beyerer, Balanced Pedestrian Attribute Recognition for Improved Attribute-based Person Retrieval, 2023, and the UPAR Challenge 2024 report.
+
+Ties
+If you return distances or similarities, equal values are ranked in gallery order. Avoid large groups of ties, they make your result depend on that order.
+
+Leaderboard
+Your latest submission is the one shown on the leaderboard, not your best.
+
+
+
+4. Submission:
+
+You upload a zip containing your model, the platform runs it against data you never see.
+
+The zip
+Zip the contents of your submission folder, not the folder itself:
+
+cd my_submission
+zip -r ../my_submission.zip . -x "*/__pycache__/*" "*.DS_Store" ".git/*"
+unzip -l ../my_submission.zip | head    # run.py must be at the root
+Required at the root of the archive:
+
+run.py           your entry point
+metadata.yaml    copy it unchanged from the example submission
+<anything else>  weights, modules, configs
+The API
+The ingestion program imports run.py and calls:
+
+def load_model() -> None:
+    """Optional. Called once. Load your weights here."""
+
+def rank_gallery(sample: dict) -> dict:
+    """Called once, with all queries and the whole gallery."""
+sample is:
+
+{
+  "attribute_names": ["Age-Young", "Age-Adult", ...],     # the 40 names, in order
+  "queries": [[0, 1, 0, 1, ...], ...],                    # Q queries x 40 values (0/1)
+  "gallery": [                                            # G gallery images
+    {"index": 0,
+     "image": "<dataset>/images/0.jpg",                       # path as listed in images.csv
+     "image_path": "/app/input_data/images/<dataset>/images/0.jpg"},   # absolute, readable
+    ...
+  ],
+}
+Return a dict with exactly one of these keys. Each holds a Q x G matrix (list of lists, numpy array or tensor): row i belongs to queries[i], column j to gallery[j].
+
+Key	Content	Ranked
+"distances"	float, how far image j is from query i	smallest first
+"similarities"	float, how well image j matches query i	largest first
+"ranking"	int, row i = all gallery indices 0..G-1, best match first	as given
+The key states the direction of your values, so a distance is never mistaken for a score. A bare array, NaN/Inf, a wrong shape, or a ranking row that is not a permutation of 0..G-1 fail the submission with a message in the ingestion log. Equal distances or similarities are ranked in gallery order.
+
+The usual recipe is two steps: predict attribute probabilities for every gallery image once, then compute the distance of every query to every image. The example submission does exactly that, without ever building a Q x G x 40 tensor.
+
+Runtime environment
+No network access. Ship your weights inside the zip. Nothing is downloaded at run time.
+The image is pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime: Python 3.11, torch 2.4.1, torchvision, numpy, Pillow. Anything else your code imports must travel in the zip.
+There is a wall-clock limit for the whole run. rank_gallery() is a single call, so batch your image loading and inference yourself, and print your own progress: it shows up in the ingestion log.
+The working directory is your submission folder, so relative paths to your weights work.
+
+
+5. Terms and Conditions:
+
+1. The challenge
+The UPAR Challenge at the Real-World Surveillance workshop, WACV 2027, is a skill-based contest with three independent tracks. These terms cover Track 2: Attribute-Based Person Retrieval. The challenge is run entirely on Codabench: this benchmark page is the official source for the task description, data, evaluation, schedule, rules and announcements.
+
+2. Eligibility
+Participation is open to everyone except the organizers and members of their research groups.
+You may participate alone or in a team. Each person may belong to one team only, and each team may use one Codabench account only.
+To be eligible for ranking and prizes you must register with your real identity and affiliation.
+3. Training data and pre-training
+Models must be trained only on the training data provided by the organizers.
+The use of external data to fine-tune PAR is not permitted.
+Pre-trained models trained on common datasets such as ImageNet, or foundation models/VLMs that were not specifically trained for PAR, are permitted.
+Any use of the test images is prohibited, including training, pseudo-labelling, manual annotation and hyper-parameter selection, and leads to disqualification. Test images are never released. Attempts to extract them from the evaluation container lead to disqualification.
+4. Submissions
+Submissions are code submissions as described on the Submission page. The submitted code must not access the network or tamper with the evaluation environment.
+Submission limits per day and in total are shown on the phase.
+The ranking metric is mADM, see the Evaluation page. The latest valid submission of a team counts.
+To win, a submission must outperform the organizers' baseline.
+5. Verification and publication
+The top-ranked teams must provide their training code and a short description of the method (fact sheet) so the organizers can verify the result and compliance with these terms. Teams that do not comply are removed from the final ranking.
+All participants are invited to submit papers to the RWS workshop by Oct 23, 2026 and to present their work at the workshop.
+6. Data licence
+The UPAR annotations are published under the Creative Commons Attribution-NonCommercial-ShareAlike 3.0 licence. The underlying image datasets keep their own licences and are for non-commercial research use only. If you use the data, cite the UPAR paper and the papers of the sub-datasets.
+
+7. General conditions
+The organizers may change the schedule, clarify the rules, or disqualify participants who violate these terms or the spirit of the challenge.
+The organizers' decisions on ranking and eligibility are final.
+The data and the platform are provided as is, without warranty.
+By registering you accept these terms.
