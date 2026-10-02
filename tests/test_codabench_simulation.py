@@ -17,7 +17,7 @@ import numpy as np
 import torch
 
 WORKSPACE = "/Users/sama/D/RWS2027"
-ZIP_PATH = os.path.join(WORKSPACE, "submissions/EXP-003_submission.zip")
+ZIP_PATH = os.path.join(WORKSPACE, "submissions/EXP-004_submission.zip")
 SANDBOX_DIR = "/tmp/codabench_ingestion_container"
 VAL_DIR = os.path.join(WORKSPACE, "UPAR-Challenge-2027/data/annotations/task2/val")
 DATA_DIR = os.path.join(WORKSPACE, "UPAR-Challenge-2027/data")

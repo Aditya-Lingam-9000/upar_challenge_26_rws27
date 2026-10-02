@@ -1,0 +1,48 @@
+experiment_id: EXP-005A
+description: "Swin-Transformer Tiny (27.5M params) with Shifted-Window Self-Attention at 256x128 resolution for low-latency Codabench CPU execution & ensemble synergy"
+
+model:
+  backbone: swin_t
+  pretrained: true
+  dropout_p: 0.3
+  embedding_dim: 512
+
+dataset:
+  train_split: train
+  val_split: val
+  image_height: 256
+  image_width: 128
+  preload_ram: true
+
+sampler:
+  type: domain_balanced
+  market_ratio: 0.25
+  pa100k_ratio: 0.50
+  peta_ratio: 0.25
+
+loss:
+  asl_weight: 1.0
+  group_weight: 0.50
+  gamma_neg: 4.0
+  gamma_pos: 0.0
+  clip: 0.05
+
+training:
+  epochs: 50
+  batch_size: 160          # Per-GPU batch size (Global DDP effective batch: 320)
+  val_batch_size: 128
+  learning_rate: 0.0001
+  min_lr: 0.000001
+  weight_decay: 0.0001
+  warmup_epochs: 1
+  lr_scheduler: cosine
+  fp16: true
+  accumulation_steps: 1
+  num_workers: 2
+  log_interval: 25
+  eval_interval: 1
+
+paths:
+  data_dir: /kaggle/input/datasets/hinewk/upar-challenge-2027-data/data
+  checkpoint_dir: checkpoints
+  submission_dir: submissions

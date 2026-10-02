@@ -4,6 +4,7 @@ from __future__ import annotations
 import torch.nn as nn
 from src.models.baseline_resnet import ResNet50PAR
 from src.models.convnext_model import ConvNeXtPAR
+from src.models_swin import SwinPAR
 
 
 def build_model(
@@ -38,5 +39,13 @@ def build_model(
             dropout_p=dropout_p,
             embedding_dim=embedding_dim,
         )
+    elif name in ["swin_t", "swin-t", "swin_tiny", "swin-tiny", "swin"]:
+        return SwinPAR(
+            variant="tiny",
+            num_attributes=num_attributes,
+            pretrained=pretrained,
+            dropout=dropout_p,
+        )
     else:
         raise ValueError(f"Unsupported model architecture: {model_name}")
+

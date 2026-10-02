@@ -30,7 +30,31 @@ def generate_run_py(
 ) -> str:
     """Generate self-contained pure PyTorch run.py module."""
 
-    if "tiny" in model_name.lower():
+    if "swin" in model_name.lower():
+        model_class_def = '''
+class SwinPAR(nn.Module):
+    def __init__(self, variant: str = "tiny", num_attributes: int = 40):
+        super().__init__()
+        self.backbone = models.swin_t(weights=None)
+        in_features = self.backbone.head.in_features  # 768
+        self.backbone.head = nn.Identity()
+        self.classifier = nn.Sequential(
+            nn.LayerNorm(in_features, eps=1e-6),
+            nn.Linear(in_features, 512),
+            nn.GELU(),
+            nn.Dropout(p=0.3),
+            nn.Linear(512, num_attributes),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        features = self.backbone(x)
+        return self.classifier(features)
+
+
+def create_model_instance() -> nn.Module:
+    return SwinPAR(variant="tiny", num_attributes=40)
+'''
+    elif "tiny" in model_name.lower() or "convnext_tiny" in model_name.lower():
         model_class_def = '''
 class ConvNeXtPAR(nn.Module):
     def __init__(self, variant: str = "tiny", num_attributes: int = 40):
