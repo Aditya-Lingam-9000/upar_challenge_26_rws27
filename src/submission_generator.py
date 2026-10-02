@@ -30,7 +30,33 @@ def generate_run_py(
 ) -> str:
     """Generate self-contained pure PyTorch run.py module."""
 
-    if "convnext" in model_name.lower():
+    if "tiny" in model_name.lower():
+        model_class_def = '''
+class ConvNeXtPAR(nn.Module):
+    def __init__(self, variant: str = "tiny", num_attributes: int = 40):
+        super().__init__()
+        base = models.convnext_tiny(weights=None)
+        in_features = 768
+        self.features = base.features
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.classifier = nn.Sequential(
+            nn.LayerNorm(in_features, eps=1e-6),
+            nn.Linear(in_features, 512),
+            nn.GELU(),
+            nn.Dropout(p=0.3),
+            nn.Linear(512, num_attributes),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        feat_map = self.features(x)
+        feat_vec = self.avgpool(feat_map).flatten(1)
+        return self.classifier(feat_vec)
+
+
+def create_model_instance() -> nn.Module:
+    return ConvNeXtPAR(variant="tiny", num_attributes=40)
+'''
+    elif "convnext" in model_name.lower():
         model_class_def = '''
 class ConvNeXtPAR(nn.Module):
     def __init__(self, variant: str = "base", num_attributes: int = 40):
@@ -106,6 +132,7 @@ import torch.nn as nn
 import torchvision.transforms as T
 import torchvision.models as models
 
+# Canonical list of 40 UPAR attributes in challenge training order
 CANONICAL_ATTRIBUTES = [
     "Age-Young", "Age-Adult", "Age-Old", "Gender-Female",
     "Hair-Length-Short", "Hair-Length-Long", "Hair-Length-Bald",
@@ -130,8 +157,6 @@ _DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 _MODEL: nn.Module | None = None
 _IMG_HEIGHT = {height}
 _IMG_WIDTH = {width}
-_TEMPERATURE = {temperature:.4f}
-_USE_TTA = {use_tta}
 
 _TRANSFORM = T.Compose([
     T.Resize((_IMG_HEIGHT, _IMG_WIDTH), interpolation=T.InterpolationMode.BILINEAR),
@@ -146,71 +171,97 @@ def load_model() -> None:
     if _MODEL is not None:
         return
 
-    print(f"[Codabench] Initializing inference model on device: {{_DEVICE}}...", flush=True)
-    _MODEL = create_model_instance()
+    print(f"Loading weights from {{WEIGHTS_PATH}} onto device {{_DEVICE}}...", flush=True)
+    model = create_model_instance()
 
     if not os.path.exists(WEIGHTS_PATH):
         raise FileNotFoundError(f"Missing model weights at: {{WEIGHTS_PATH}}")
 
+    # weights_only=True ensures secure, safe unpickling on PyTorch 2.4/2.6
     try:
-        state_dict = torch.load(WEIGHTS_PATH, map_location=_DEVICE, weights_only=True)
+        ckpt = torch.load(WEIGHTS_PATH, map_location=_DEVICE, weights_only=True)
     except TypeError:
-        state_dict = torch.load(WEIGHTS_PATH, map_location=_DEVICE)
+        # Backward compatibility for older PyTorch versions without weights_only argument
+        ckpt = torch.load(WEIGHTS_PATH, map_location=_DEVICE)
 
-    if isinstance(state_dict, dict) and "model_state_dict" in state_dict:
-        state_dict = state_dict["model_state_dict"]
+    if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
+        state_dict = ckpt["model_state_dict"]
+    elif isinstance(ckpt, dict):
+        state_dict = ckpt
+    else:
+        raise ValueError(f"Unexpected checkpoint format: {{type(ckpt)}}")
 
-    clean_state = {{k[7:] if k.startswith("module.") else k: v for k, v in state_dict.items()}}
-    _MODEL.load_state_dict(clean_state, strict=False)
-    _MODEL.to(_DEVICE)
-    _MODEL.eval()
-    print(f"[Codabench] Model loaded successfully! (TTA: {{_USE_TTA}}, Temp: {{_TEMPERATURE}})", flush=True)
+    # Clean state dict keys if needed
+    cleaned_state_dict = {{}}
+    for k, v in state_dict.items():
+        if k.startswith("module."):
+            cleaned_state_dict[k[7:]] = v
+        elif k.startswith("embedding_head."):
+            continue
+        else:
+            cleaned_state_dict[k] = v
+
+    model.load_state_dict(cleaned_state_dict, strict=True)
+    model.to(_DEVICE)
+    model.eval()
+    _MODEL = model
+    print("Model successfully loaded and initialized in eval mode.", flush=True)
 
 
 @torch.no_grad()
 def predict_attributes(gallery: list[dict[str, Any]], attribute_names: list[str]) -> np.ndarray:
-    """Batch inference extracting calibrated attribute probabilities with optional TTA."""
-    load_model()
-    all_probs = []
-    batch_size = 64 if _DEVICE.type == "cuda" else 32
+    """Predict continuous attribute probabilities for all gallery images."""
+    if _MODEL is None:
+        load_model()
+
     num_samples = len(gallery)
+    if num_samples == 0:
+        return np.empty((0, len(attribute_names)), dtype=np.float32)
+
+    batch_size = 32
+    all_probs = []
+
+    print(f"Starting attribute inference on {{num_samples}} gallery images (batch_size={{batch_size}})...", flush=True)
+
+    use_autocast = _DEVICE.type == "cuda"
 
     for i in range(0, num_samples, batch_size):
         batch_items = gallery[i : i + batch_size]
         batch_tensors = []
         for item in batch_items:
-            img_path = item["image_path"]
+            img_path = item.get("image_path", "")
             try:
                 with Image.open(img_path) as img:
                     tensor = _TRANSFORM(img.convert("RGB"))
             except Exception:
+                # Robust fallback for unreadable/corrupted images: zero tensor
                 tensor = torch.zeros(3, _IMG_HEIGHT, _IMG_WIDTH, dtype=torch.float32)
             batch_tensors.append(tensor)
 
         batch_tensor = torch.stack(batch_tensors, dim=0).to(_DEVICE)
 
-        if _USE_TTA:
-            logits_orig = _MODEL(batch_tensor)
-            logits_flip = _MODEL(torch.flip(batch_tensor, dims=[3]))
-            probs_orig = torch.sigmoid(logits_orig / _TEMPERATURE)
-            probs_flip = torch.sigmoid(logits_flip / _TEMPERATURE)
-            probs = 0.5 * (probs_orig + probs_flip)
+        if use_autocast:
+            with torch.autocast(device_type="cuda", dtype=torch.float16):
+                logits = _MODEL(batch_tensor)
         else:
             logits = _MODEL(batch_tensor)
-            probs = torch.sigmoid(logits / _TEMPERATURE)
 
-        all_probs.append(probs.cpu().numpy())
+        probs = torch.sigmoid(logits).cpu().numpy()
+        all_probs.append(probs)
+
+        del batch_tensor, logits
 
         processed = i + len(batch_items)
         if (i // batch_size) % 50 == 0 or processed >= num_samples:
-            pct = processed / num_samples * 100
-            print(f"[Codabench] [{{processed:5d}}/{{num_samples:5d}}] ({{pct:5.1f}}%) Gallery processed", flush=True)
+            if _DEVICE.type == "cuda":
+                torch.cuda.empty_cache()
+            print(f"[{{processed}}/{{num_samples}}] Gallery images processed ({{processed / num_samples * 100:.1f}}%)", flush=True)
 
     raw_probs = np.vstack(all_probs).astype(np.float32)
 
-    # Realign output probabilities if attribute ordering differs
+    # Align columns to match requested attribute_names if ordering differs
     if attribute_names != CANONICAL_ATTRIBUTES:
-        print("[Codabench] Realigning columns to sample attribute_names...", flush=True)
+        print("Realigning output probabilities to match sample attribute_names...", flush=True)
         attr_to_idx = {{name: idx for idx, name in enumerate(CANONICAL_ATTRIBUTES)}}
         col_indices = [attr_to_idx.get(name, -1) for name in attribute_names]
         aligned_probs = np.zeros((raw_probs.shape[0], len(attribute_names)), dtype=np.float32)
@@ -218,25 +269,39 @@ def predict_attributes(gallery: list[dict[str, Any]], attribute_names: list[str]
             if src_col >= 0:
                 aligned_probs[:, target_col] = raw_probs[:, src_col]
             else:
-                aligned_probs[:, target_col] = 0.5
+                aligned_probs[:, target_col] = 0.5  # Neutral fallback for unrecognized attribute
         return aligned_probs
 
     return raw_probs
 
 
 def rank_gallery(sample: dict[str, Any]) -> dict[str, Any]:
-    """Official Codabench evaluation entrypoint."""
+    """Official Codabench entrypoint.
+
+    Args:
+      sample: dict with:
+        - "gallery": list of dicts with "image_path"
+        - "attribute_names": list of 40 attribute names
+        - "queries": (Q, 40) binary query array/list
+
+    Returns:
+      {{"distances": distances}}: (Q, G) float32 numpy array.
+    """
     gallery = sample["gallery"]
     attribute_names = sample["attribute_names"]
     queries = np.asarray(sample["queries"], dtype=np.float32)
 
     probs = predict_attributes(gallery, attribute_names)
 
-    # Vectorized continuous L1 distance: sum|q - p| = sum(p) + q @ (1.0 - 2.0 * p).T
+    # Vectorized continuous L1 distance between binary query q and probabilities p:
+    # sum_a |q_a - p_a| = sum(p) + q @ (1.0 - 2.0 * p).T
+    # Shape: (Q, G)
     distances = probs.sum(axis=1, keepdims=True).T + queries @ (1.0 - 2.0 * probs).T
+
+    # Sanitize distances: no NaN or Inf can ever fail ingestion
     distances = np.nan_to_num(distances, nan=20.0, posinf=40.0, neginf=0.0).astype(np.float32)
 
-    print(f"[Codabench] Gallery ranking complete. Output matrix shape: {{distances.shape}}", flush=True)
+    print(f"Rank gallery complete. Computed distance matrix shape: {{distances.shape}}", flush=True)
     return {{"distances": distances}}
 '''
     return content
