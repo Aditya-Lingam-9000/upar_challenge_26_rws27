@@ -588,7 +588,7 @@ def load_yaml_config(config_path: str) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train ABPR Model for RWS 2027 Track 2")
     parser.add_argument("--config", type=str, default=None, help="Path to YAML configuration file")
-    parser.add_argument("--model", type=str, default="convnext_base", choices=["resnet50", "convnext_tiny", "convnext_base"])
+    parser.add_argument("--model", type=str, default="convnext_base", help="Model architecture (resnet50, convnext_tiny, convnext_base, swin_t, etc.)")
     parser.add_argument("--data_root", type=str, default="UPAR-Challenge-2027/data")
     parser.add_argument("--epochs", type=int, default=25)
     parser.add_argument("--batch_size", type=int, default=64)
