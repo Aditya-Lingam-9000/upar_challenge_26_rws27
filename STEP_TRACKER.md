@@ -794,15 +794,32 @@
 - **Why It Changed / Rationale:**
   - Provides a completely isolated, standalone Swin-Transformer training and packaging track without touching or risking regression on the verified ConvNeXt pipeline, enabling immediate training on Kaggle Dual Tesla T4.
 
+### Step 34: Resolved Argparse Architecture Validation for Swin-T
+- **Date / Timestamp:** 2026-10-03 00:20
+- **What Was Done:**
+  - **Argparse Architecture Validation Resolution:**
+    - Diagnosed the CLI parsing error on Kaggle: `train.py: error: argument --model: invalid choice: 'swin_t' (choose from resnet50, convnext_tiny, convnext_base)`.
+    - Removed the rigid `choices` constraint from `parser.add_argument("--model", ...)` in [`src/train.py`](file:///Users/sama/D/RWS2027/src/train.py#L591), allowing any model architecture recognized by [`build_model`](file:///Users/sama/D/RWS2027/src/models/factory.py) (`resnet50`, `convnext_tiny`, `convnext_base`, `swin_t`, etc.).
+    - Verified locally that `train.py` builds and initializes `swin_t` ($27,935,138$ parameters) with zero errors.
+    - Committed and pushed changes to remote repository (`origin main`).
+- **What Changed / Created:**
+  - Modified [`src/train.py`](file:///Users/sama/D/RWS2027/src/train.py): Generalized `--model` argument parser.
+  - Pushed commit `a3a6808` to GitHub.
+  - Updated [`STEP_TRACKER.md`](file:///Users/sama/D/RWS2027/STEP_TRACKER.md).
+- **Why It Changed / Rationale:**
+  - Allows Kaggle `git pull origin main` in Cell 3 of [`notebooks/kaggle_exp005_swin_t_dual_gpu.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp005_swin_t_dual_gpu.ipynb) to immediately accept `--model swin_t` in `torchrun` without crashing.
+
 ---
 
 ## Next Steps Roadmap
-1. **Submit EXP-004 to Codabench:**
-   - Upload [`submissions/EXP-004_submission.zip`](file:///Users/sama/D/RWS2027/submissions/EXP-004_submission.zip) to [Codabench Competition #18196](https://www.codabench.org/competitions/18196/).
-2. **Launch EXP-005A (Swin-T) on Kaggle Dual Tesla T4:**
-   - Run [`notebooks/kaggle_exp005_swin_t_dual_gpu.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp005_swin_t_dual_gpu.ipynb) in background mode via **Save Version -> Save & Run All (Commit)** (~2.0–2.5 hours).
-3. **Build EXP-005 Heterogeneous Ensemble (ConvNeXt-Tiny + Swin-T):**
-   - Blend optimal probabilities from both models with TTA and Temperature Calibration to achieve target $\mathbf{mADM \ge 0.6800}$.
+1. **Rerun Cell 3 & Cell 4 on Kaggle:**
+   - In [`notebooks/kaggle_exp005_swin_t_dual_gpu.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp005_swin_t_dual_gpu.ipynb), run Cell 3 (`git pull origin main`) and Cell 4 (`torchrun --nproc_per_node=2 -m src.train ...`).
+   - The training will start immediately with `swin_t`.
+2. **Monitor EXP-004 Codabench Submission:**
+   - Check Codabench leaderboard for the official score of `EXP-004_submission.zip`.
+3. **Assemble EXP-005 Heterogeneous Ensemble:**
+   - Combine `ConvNeXt-Tiny` and `Swin-T` checkpoints upon completion to produce our target $\mathbf{mADM \ge 0.6800}$ submission.
+
 
 
 
