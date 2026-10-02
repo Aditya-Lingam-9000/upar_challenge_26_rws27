@@ -722,15 +722,21 @@
     - Updated [`src/submission_generator.py`](file:///Users/sama/D/RWS2027/src/submission_generator.py): Added native `convnext_tiny` 768-dim LayerNorm support in `generate_run_py`.
     - Created [`configs/exp004_convnext_tiny_kaggle.yaml`](file:///Users/sama/D/RWS2027/configs/exp004_convnext_tiny_kaggle.yaml): Configured 30-epoch DDP training with batch size 128 (64/GPU) at $256 \times 128$.
     - Created [`notebooks/kaggle_exp004_convnext_tiny_dual_gpu.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp004_convnext_tiny_dual_gpu.ipynb): Production Kaggle Dual Tesla T4 notebook with auto-detection, DDP launcher, and submission exporter.
-  - **Verified Packaging Pipeline:**
+  - **Verified Packaging Pipeline & Fixed DDP Uneven Batch Deadlock:**
+    - Diagnosed and resolved the exact DDP deadlock occurring at the end of Epoch 1 when using custom batch sizes (e.g., 320):
+      - In `DomainBalancedBatchSampler`, when `total_samples // batch_size` resulted in an odd number of total batches (305), Rank 0 received 153 batches while Rank 1 received 152 batches. When Rank 0 began its 153rd batch and called `loss.backward()`, NCCL AllReduce hung indefinitely because Rank 1 had already exited the loop.
+      - Fixed in [`src/dataset.py`](file:///Users/sama/D/RWS2027/src/dataset.py) by enforcing `self.num_batches = (self.total_samples // (self.batch_size * self.world_size)) * self.world_size`, guaranteeing identical batch counts on both ranks for any batch size.
+      - Optimized validation in [`src/evaluate.py`](file:///Users/sama/D/RWS2027/src/evaluate.py) to use `num_workers=0` (in-memory RAM cache) and `log_interval=25`, eliminating multiprocessing fork serialization locks.
     - Successfully tested automated packaging of `EXP-004_submission.zip` (~99.5 MB compressed, 107.7 MB uncompressed weights).
 - **What Changed / Created:**
+  - Modified [`src/dataset.py`](file:///Users/sama/D/RWS2027/src/dataset.py): Fixed DDP sampler batch count alignment.
+  - Modified [`src/evaluate.py`](file:///Users/sama/D/RWS2027/src/evaluate.py): Set `num_workers=0` for direct RAM cache reads and `log_interval=25`.
   - Modified [`src/submission_generator.py`](file:///Users/sama/D/RWS2027/src/submission_generator.py): Added `convnext_tiny` support.
   - Created [`configs/exp004_convnext_tiny_kaggle.yaml`](file:///Users/sama/D/RWS2027/configs/exp004_convnext_tiny_kaggle.yaml).
   - Created [`notebooks/kaggle_exp004_convnext_tiny_dual_gpu.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp004_convnext_tiny_dual_gpu.ipynb).
   - Updated [`STEP_TRACKER.md`](file:///Users/sama/D/RWS2027/STEP_TRACKER.md) and [`EXPERIMENT_TRACKER.md`](file:///Users/sama/D/RWS2027/EXPERIMENT_TRACKER.md).
 - **Why It Changed / Rationale:**
-  - Guarantees top leaderboard performance with fast, reliable execution under the Codabench 2-hour timeout constraint.
+  - Eliminates DDP synchronization hangs and guarantees seamless transition between training and validation across all 50 epochs.
 
 ---
 

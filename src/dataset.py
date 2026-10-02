@@ -312,7 +312,9 @@ class DomainBalancedBatchSampler(Sampler):
             d: np.where(domain_ids == d)[0] for d in range(3)
         }
         self.total_samples = len(domain_ids)
-        self.num_batches = self.total_samples // batch_size
+        # Ensure total batches across all ranks is an exact multiple of world_size to prevent DDP deadlock
+        num_global_steps = self.total_samples // (self.batch_size * self.world_size)
+        self.num_batches = num_global_steps * self.world_size
 
     def set_epoch(self, epoch: int) -> None:
         self.epoch = epoch

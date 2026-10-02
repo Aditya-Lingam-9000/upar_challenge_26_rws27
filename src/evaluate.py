@@ -57,7 +57,7 @@ def extract_gallery_probabilities(
     val_loader: DataLoader,
     device: torch.device,
     use_fp16: bool = True,
-    log_interval: int = 50,
+    log_interval: int = 25,
 ) -> np.ndarray:
     """Extract continuous attribute prediction probabilities for all gallery images."""
     model.eval()
@@ -142,11 +142,12 @@ def run_full_evaluation(
         width=width,
         is_train=False,
     )
+    # Using num_workers=0 ensures instant direct in-memory RAM access with zero fork copy-on-write overhead
     val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers,
+        num_workers=0,
         pin_memory=False,
     )
 
