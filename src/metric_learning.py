@@ -213,17 +213,17 @@ def evaluate_distance_matrix(
     directly from a distance matrix of shape (Q, G).
     """
     Q = queries.shape[0]
-    G = gallery_gt.shape[0]
-
-    # Memory-efficient agreement computation via 2D matrix multiplication:
-    # agreed[q, g] = sum_a (queries[q, a] == gallery_gt[g, a])
-    # For binary {0, 1}: q*g + (1-q)*(1-g)
-    agreed = queries @ gallery_gt.T + (1.0 - queries) @ (1.0 - gallery_gt).T  # (Q, G) float32: only ~462 MB
-    is_correct = (agreed >= 39.5)  # All 40 attributes match exactly
+    # Memory-efficient O(Q*G) difference calculation without 18.5 GB 3D broadcast:
+    # For binary vectors: sum |q - g| = sum(q) + sum(g) - 2 * (q @ g.T)
+    q_sum = queries.sum(axis=1, keepdims=True)
+    g_sum = gallery_gt.sum(axis=1, keepdims=True).T
+    q_dot_g = queries @ gallery_gt.T
+    diffs = np.clip(q_sum + g_sum - 2.0 * q_dot_g, 0.0, 40.0)
+    is_correct = (diffs < 0.5)
     ranks = np.argsort(distances, axis=1)
 
     adms, aps, r1_list, r5_list, r10_list, inps = [], [], [], [], [], []
-    dom = agreed / 40.0
+    dom = 1.0 - (diffs / 40.0)
     mu_dom = np.mean(dom, axis=1, keepdims=True)
     denom = np.maximum(1.0 - mu_dom, 1e-6)
     ndom = np.maximum(0.0, (dom - mu_dom) / denom)
@@ -250,11 +250,11 @@ def evaluate_distance_matrix(
         adms.append(np.mean(adm_k))
 
     return {
-        "mADM": float(np.mean(adms)),
-        "mAP": float(np.mean(aps)),
-        "Rank-1": float(np.mean(r1_list)),
-        "Rank-5": float(np.mean(r5_list)),
-        "Rank-10": float(np.mean(r10_list)),
-        "mINP": float(np.mean(inps)),
+        "mADM": float(np.mean(adms)) if len(adms) > 0 else 0.0,
+        "mAP": float(np.mean(aps)) if len(aps) > 0 else 0.0,
+        "Rank-1": float(np.mean(r1_list)) if len(r1_list) > 0 else 0.0,
+        "Rank-5": float(np.mean(r5_list)) if len(r5_list) > 0 else 0.0,
+        "Rank-10": float(np.mean(r10_list)) if len(r10_list) > 0 else 0.0,
+        "mINP": float(np.mean(inps)) if len(inps) > 0 else 0.0,
     }
 

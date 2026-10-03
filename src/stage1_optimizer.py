@@ -143,9 +143,12 @@ def evaluate_predictions(
     query_gt = retrieval_data.queries
     Q = queries.shape[0]
 
-    # Precompute correct matches mask: (Q, G)
-    diffs = np.abs(query_gt[:, None, :] - gallery_gt[None, :, :]).sum(axis=-1)
-    is_correct = (diffs == 0)
+    # Precompute correct matches mask: (Q, G) without 18.5 GB 3D broadcast:
+    q_sum = query_gt.sum(axis=1, keepdims=True)
+    g_sum = gallery_gt.sum(axis=1, keepdims=True).T
+    q_dot_g = query_gt @ gallery_gt.T
+    diffs = np.clip(q_sum + g_sum - 2.0 * q_dot_g, 0.0, 40.0)
+    is_correct = (diffs < 0.5)
 
     # Sort ranks
     ranks = np.argsort(distances, axis=1)
