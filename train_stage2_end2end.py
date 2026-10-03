@@ -5,28 +5,54 @@ Trains a unified Swin-Transformer Tiny multi-task architecture directly from raw
   2. Identity Metric Space Alignment (Task 2 supervision via ArcFace Loss over 7,204 identities)
   3. Query-to-Image Cross-Modal Alignment (Task 2 supervision via InfoNCE Contrastive Loss)
 
-Requires ZERO previous submission zips. 100% self-contained training and packaging.
-Memory-safe: Vectorized 2D matrix matching, zero 18.5 GB temporary memory leaks.
+Features & Design:
+  - Supports Dual-GPU DDP (torchrun --nproc_per_node=2) with NCCL backend
+  - Domain-balanced sampling (Market1501, PA-100k, PETA) via DomainBalancedBatchSampler
+  - High-throughput parallel RAM byte caching with chunked progress reporting
+  - ZERO external submission zip dependencies: 100% self-contained
+  - Vectorized 2D matrix matching during validation (memory-safe, zero 18.5GB RAM leaks)
+  - Strictly zero-tqdm continuous stdout logging for Kaggle background executions
+  - Automatic packaging of standalone Codabench submission zip
 """
 from __future__ import annotations
 
 import argparse
 import csv
+import datetime
 import gc
+import io
+import math
 import os
 import shutil
+import sys
 import time
+import warnings
 import zipfile
+from typing import Any, Optional
+
+# Filter benign framework stride and unused parameter warnings
+warnings.filterwarnings("ignore", message=".*Grad strides do not match bucket view strides.*")
+warnings.filterwarnings("ignore", message=".*find_unused_parameters.*")
+
+# Ensure project root is in python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import numpy as np
 from PIL import Image
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, Dataset
 import torchvision.models as models
 import torchvision.transforms as T
 
-from src.dataset import Task2RetrievalEvalData, resolve_data_root, stage_dataset_to_fast_local_storage
+from src.dataset import (
+    DomainBalancedBatchSampler,
+    Task2RetrievalEvalData,
+    resolve_data_root,
+)
 from src.evaluate import get_device
 from src.losses import AsymmetricLoss, CategorySoftmaxLoss
 from src.metric_learning import (
@@ -58,16 +84,94 @@ CANONICAL_ATTRIBUTES = [
 ]
 
 
+def setup_distributed() -> tuple[bool, int, int, int]:
+    """Initialize DistributedDataParallel (DDP) if launched via torchrun on CUDA."""
+    if "RANK" in os.environ and "WORLD_SIZE" in os.environ and torch.cuda.is_available():
+        rank = int(os.environ["RANK"])
+        world_size = int(os.environ["WORLD_SIZE"])
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        torch.cuda.set_device(local_rank)
+        torch.distributed.init_process_group(
+            backend="nccl",
+            init_method="env://",
+        )
+        return True, rank, world_size, local_rank
+    return False, 0, 1, 0
+
+
+def cleanup_distributed() -> None:
+    """Clean up DDP process group if initialized."""
+    if torch.distributed.is_initialized():
+        torch.distributed.destroy_process_group()
+
+
+def get_memory_info(device: torch.device) -> str:
+    """Return current memory usage string."""
+    if device.type == "cuda":
+        allocated = torch.cuda.memory_allocated(device) / (1024 * 1024)
+        reserved = torch.cuda.memory_reserved(device) / (1024 * 1024)
+        return f"VRAM: {allocated:.0f}MB / {reserved:.0f}MB"
+    elif device.type == "mps":
+        allocated = torch.mps.current_allocated_memory() / (1024 * 1024)
+        return f"UnifiedMem: {allocated:.0f}MB"
+    return "CPU"
+
+
+def format_duration(seconds: float) -> str:
+    """Format duration in seconds to human-readable string."""
+    if seconds is None or np.isnan(seconds) or np.isinf(seconds) or seconds < 0:
+        return "--m --s"
+    seconds = int(seconds)
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+    if hours > 0:
+        return f"{hours:02d}h {minutes:02d}m {secs:02d}s"
+    return f"{minutes:02d}m {secs:02d}s"
+
+
+def print_codabench_table(
+    epoch: int,
+    epochs: int,
+    metrics: dict[str, float],
+    exp_id: str = "EXP-006",
+    participant: str = "Jyothiradithya Lingam",
+    is_best: bool = False,
+) -> None:
+    """Print validation results in the exact official Codabench competition leaderboard table format."""
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    print("\n" + "=" * 115, flush=True)
+    print("Results", flush=True)
+    print(f"Task:        Attribute-based Person Retrieval - validation set (Epoch {epoch:02d}/{epochs:02d})", flush=True)
+    print(f"{'#':<4} {'Participant':<26} {'Date':<18} {'ID':<10} {'mADM':<9} {'mAP':<9} {'Rank-1':<9} {'Rank-5':<9} {'Rank-10':<9} {'mINP':<9}", flush=True)
+    print("-" * 115, flush=True)
+    print(
+        f"{epoch:<4} {participant:<26} {now_str:<18} {exp_id:<10} "
+        f"{metrics['mADM']:<9.4f} {metrics['mAP']:<9.4f} "
+        f"{metrics['Rank-1']:<9.4f} {metrics['Rank-5']:<9.4f} {metrics['Rank-10']:<9.4f} "
+        f"{metrics['mINP']:<9.4f}",
+        flush=True,
+    )
+    if "PAR_mA" in metrics:
+        print(f"Pedestrian Attribute Recognition (PAR) Mean Accuracy: {metrics['PAR_mA'] * 100:.2f}%", flush=True)
+    if is_best:
+        print(f"*** NEW BEST VALIDATION SCORE: mADM = {metrics['mADM']:.4f} ***", flush=True)
+    print("=" * 115 + "\n", flush=True)
+
+
 class UPAREndToEndDataset(Dataset):
-    """End-to-End multi-task training dataset loading images, 40 attributes, identity IDs, and query vectors."""
+    """End-to-End multi-task training dataset loading images, 40 attributes, identity IDs, domain IDs, and query vectors."""
 
     def __init__(
         self,
         data_root: str,
         transform: T.Compose | None = None,
+        preload_to_ram: bool = True,
         debug_samples: int | None = None,
+        is_master: bool = True,
     ) -> None:
         self.data_root = data_root
+        self.preload_to_ram = preload_to_ram
         self.transform = transform or T.Compose([
             T.Resize((256, 128), interpolation=T.InterpolationMode.BILINEAR),
             T.RandomHorizontalFlip(p=0.5),
@@ -95,11 +199,12 @@ class UPAREndToEndDataset(Dataset):
                 if len(r) >= 2:
                     img_to_id[r[0].strip()] = int(r[1].strip())
 
-        # 3. Load train.csv images and 40 attributes
+        # 3. Load train.csv images, 40 attributes, and domain IDs
         train_csv = os.path.join(data_root, "annotations", "train.csv")
         self.image_paths: list[str] = []
         self.labels: list[np.ndarray] = []
         self.identity_ids: list[int] = []
+        self.domain_ids: list[int] = []
 
         with open(train_csv, "r", encoding="utf-8") as f:
             reader = csv.reader(f)
@@ -111,29 +216,88 @@ class UPAREndToEndDataset(Dataset):
                 attrs = np.array([float(x.strip()) for x in row[1:41]], dtype=np.float32)
                 ident = img_to_id.get(rel_path, 0)
 
+                # Domain IDs: 0 = Market1501, 1 = PA100k, 2 = PETA
+                if rel_path.startswith("Market1501"):
+                    did = 0
+                elif rel_path.startswith("PA100k"):
+                    did = 1
+                elif rel_path.startswith("PETA"):
+                    did = 2
+                else:
+                    did = 0
+
                 self.image_paths.append(rel_path)
                 self.labels.append(attrs)
                 self.identity_ids.append(ident)
+                self.domain_ids.append(did)
 
         if debug_samples is not None and debug_samples > 0:
             self.image_paths = self.image_paths[:debug_samples]
             self.labels = self.labels[:debug_samples]
             self.identity_ids = self.identity_ids[:debug_samples]
+            self.domain_ids = self.domain_ids[:debug_samples]
 
         self.labels = np.array(self.labels, dtype=np.float32)
         self.identity_ids = np.array(self.identity_ids, dtype=np.int64)
+        self.domain_ids = np.array(self.domain_ids, dtype=np.int64)
+
+        # Preload image bytes if requested
+        self.image_bytes: list[bytes] | None = None
+        if self.preload_to_ram and len(self.image_paths) > 0:
+            self._preload_images(is_master=is_master)
+
+    def _preload_images(self, is_master: bool = True) -> None:
+        """Preload all raw image bytes into system RAM in parallel with real-time chunk logging."""
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+
+        t0 = time.time()
+        n_total = len(self.image_paths)
+        if is_master:
+            print(f"[RAM Cache] Preloading {n_total:,} images into system RAM (16 concurrent I/O threads)...", flush=True)
+
+        def read_file(p: str) -> bytes:
+            fp = os.path.join(self.data_root, p)
+            try:
+                with open(fp, "rb") as bf:
+                    return bf.read()
+            except Exception:
+                return b""
+
+        results = [b""] * n_total
+        chunk_size = 20000
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            for start_i in range(0, n_total, chunk_size):
+                end_i = min(start_i + chunk_size, n_total)
+                chunk_paths = self.image_paths[start_i:end_i]
+                chunk_results = list(pool.map(read_file, chunk_paths))
+                results[start_i:end_i] = chunk_results
+                if is_master and end_i < n_total:
+                    pct = (end_i / n_total) * 100
+                    elapsed_so_far = time.time() - t0
+                    speed = end_i / max(elapsed_so_far, 0.1)
+                    print(f"[RAM Cache] {end_i:,} / {n_total:,} images ({pct:.1f}%) loaded in {elapsed_so_far:.1f}s ({speed:.0f} img/s)...", flush=True)
+
+        self.image_bytes = results
+        total_mb = sum(len(b) for b in self.image_bytes) / (1024 * 1024)
+        elapsed = time.time() - t0
+        if is_master:
+            print(f"[RAM Cache] Preloaded {n_total:,} images ({total_mb:.1f} MB) in {elapsed:.1f}s! All disk I/O eliminated.", flush=True)
 
     def __len__(self) -> int:
         return len(self.image_paths)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, int, torch.Tensor]:
-        full_p = os.path.join(self.data_root, self.image_paths[idx])
-        try:
-            with Image.open(full_p) as img:
-                img_tensor = self.transform(img.convert("RGB"))
-        except Exception:
-            img_tensor = torch.zeros(3, 256, 128, dtype=torch.float32)
+        if self.image_bytes is not None and idx < len(self.image_bytes) and len(self.image_bytes[idx]) > 0:
+            img = Image.open(io.BytesIO(self.image_bytes[idx])).convert("RGB")
+        else:
+            full_p = os.path.join(self.data_root, self.image_paths[idx])
+            try:
+                img = Image.open(full_p).convert("RGB")
+            except Exception:
+                img = Image.new("RGB", (128, 256), color=(128, 128, 128))
 
+        img_tensor = self.transform(img)
         label = torch.from_numpy(self.labels[idx])
         ident = int(self.identity_ids[idx])
         query_vec = torch.from_numpy(self.canonical_queries[ident])
@@ -142,12 +306,15 @@ class UPAREndToEndDataset(Dataset):
 
 
 class SwinPARMetric(nn.Module):
-    """Unified Swin-Transformer Tiny Model with Multi-Attribute Head + Metric Projector Heads."""
+    """Unified Swin-Transformer Tiny Model with Multi-Attribute Head, Projector Heads, and ArcFace Head."""
 
     def __init__(
         self,
         num_attributes: int = 40,
         embedding_dim: int = 512,
+        num_identities: int = 7204,
+        scale: float = 30.0,
+        margin: float = 0.20,
         pretrained: bool = True,
         dropout: float = 0.3,
     ) -> None:
@@ -180,9 +347,16 @@ class SwinPARMetric(nn.Module):
             dropout=0.1,
         )
 
+        # ArcFace loss / classification head (7,204 identities)
+        self.arcface = ArcFaceLoss(
+            num_classes=num_identities,
+            embedding_dim=embedding_dim,
+            scale=scale,
+            margin=margin,
+        )
+
     def forward_image(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Forward pass for images.
-
         Returns:
             feats: (B, 768)
             logits: (B, 40)
@@ -195,11 +369,28 @@ class SwinPARMetric(nn.Module):
 
     def forward_query(self, q: torch.Tensor) -> torch.Tensor:
         """Forward pass for queries.
-
         Returns:
             q_emb: (B, 512) L2-normalized
         """
         return self.query_encoder(q)
+
+    def forward(
+        self,
+        images: torch.Tensor,
+        query_vecs: torch.Tensor,
+        ident_labels: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        """Unified multi-task forward pass utilizing all parameters in DDP."""
+        feats = self.backbone(images)
+        logits = self.classifier(feats)
+        vis_emb = self.vis_projector(feats)
+        query_emb = self.query_encoder(query_vecs)
+
+        arc_loss = None
+        if ident_labels is not None:
+            arc_loss = self.arcface(vis_emb, ident_labels)
+
+        return logits, vis_emb, query_emb, arc_loss
 
     def get_backbone_state_dict(self) -> dict[str, torch.Tensor]:
         """Extracts backbone and classifier weights matching standalone SwinPAR."""
@@ -218,6 +409,26 @@ class SwinPARMetric(nn.Module):
         }
 
 
+class SimplePathDataset(Dataset):
+    """Dataset for gallery images during validation."""
+
+    def __init__(self, root: str, paths: list[str], transform):
+        self.root = root
+        self.paths = paths
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.paths)
+
+    def __getitem__(self, idx):
+        p = os.path.join(self.root, self.paths[idx])
+        try:
+            with Image.open(p) as img:
+                return self.transform(img.convert("RGB"))
+        except Exception:
+            return torch.zeros(3, 256, 128, dtype=torch.float32)
+
+
 def run_validation(
     model: SwinPARMetric,
     retrieval_data: Task2RetrievalEvalData,
@@ -226,7 +437,7 @@ def run_validation(
     platt_b: np.ndarray,
     lambda_metric: float = 0.25,
     val_subset: int | None = None,
-    batch_size: int = 64,
+    batch_size: int = 128,
 ) -> dict[str, float]:
     """Memory-safe validation run over Task 2 gallery and queries."""
     model.eval()
@@ -245,36 +456,30 @@ def run_validation(
         gallery_gt = gallery_gt[:val_subset]
         queries = queries[:min(val_subset, len(queries))]
 
-    num_gallery = len(gallery_paths)
+    # 1. Compute query embeddings
+    with torch.no_grad():
+        q_tensor = torch.from_numpy(queries).to(device)
+        q_embs = model.forward_query(q_tensor).cpu().numpy()
+        del q_tensor
+
+    # 2. Extract gallery features & attribute logits in batches
     all_logits = []
     all_v_embs = []
 
-    use_autocast = device.type == "cuda"
+    val_dataset = SimplePathDataset(retrieval_data.data_root, gallery_paths, val_transform)
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=2 if os.name != "nt" else 0,
+        pin_memory=(device.type == "cuda"),
+    )
 
     with torch.no_grad():
-        # Encode queries
-        q_tensor = torch.from_numpy(queries).float().to(device)
-        q_embs = model.forward_query(q_tensor).cpu().numpy()
-
-        # Encode gallery
-        for i in range(0, num_gallery, batch_size):
-            batch_paths = gallery_paths[i : i + batch_size]
-            tensors = []
-            for rel_p in batch_paths:
-                fp = os.path.join(retrieval_data.data_root, rel_p)
-                try:
-                    with Image.open(fp) as img:
-                        tensors.append(val_transform(img.convert("RGB")))
-                except Exception:
-                    tensors.append(torch.zeros(3, 256, 128, dtype=torch.float32))
-
-            batch_tensor = torch.stack(tensors, dim=0).to(device)
-            if use_autocast:
-                with torch.autocast(device_type="cuda", dtype=torch.float16):
-                    _, logits, v_emb = model.forward_image(batch_tensor)
-            else:
+        for batch_tensor in val_loader:
+            batch_tensor = batch_tensor.to(device, non_blocking=True)
+            with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=(device.type == "cuda")):
                 _, logits, v_emb = model.forward_image(batch_tensor)
-
             all_logits.append(logits.float().cpu().numpy())
             all_v_embs.append(v_emb.float().cpu().numpy())
             del batch_tensor, logits, v_emb
@@ -297,8 +502,14 @@ def run_validation(
 
     metrics = evaluate_distance_matrix(hybrid_dist, gallery_gt, queries)
 
+    # Compute PAR mean accuracy on gallery
+    gt_binary = (gallery_gt > 0.5).astype(np.float32)
+    pred_binary = (calib_probs > 0.5).astype(np.float32)
+    acc_per_attr = (gt_binary == pred_binary).mean(axis=0)
+    metrics["PAR_mA"] = float(acc_per_attr.mean())
+
     # Free evaluation memory immediately
-    del val_logits, val_v_embs, calib_logits, calib_probs, hybrid_dist, q_embs
+    del val_logits, val_v_embs, calib_logits, calib_probs, hybrid_dist, q_embs, all_logits, all_v_embs
     gc.collect()
     if device.type == "cuda":
         torch.cuda.empty_cache()
@@ -371,36 +582,58 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="EXP-006 Standalone End-to-End Metric Learning")
     parser.add_argument("--data_root", type=str, default="UPAR-Challenge-2027/data")
     parser.add_argument("--epochs", type=int, default=25)
-    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--batch_size", type=int, default=128, help="Batch size per GPU")
+    parser.add_argument("--val_batch_size", type=int, default=128, help="Validation batch size")
+    parser.add_argument("--height", type=int, default=256)
+    parser.add_argument("--width", type=int, default=128)
     parser.add_argument("--lr_backbone", type=float, default=1e-4)
     parser.add_argument("--lr_heads", type=float, default=1e-3)
+    parser.add_argument("--min_lr", type=float, default=1e-6)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
     parser.add_argument("--scale", type=float, default=30.0, help="ArcFace scale s")
     parser.add_argument("--margin", type=float, default=0.20, help="ArcFace margin m")
     parser.add_argument("--lambda_arc", type=float, default=0.5, help="Weight for ArcFace loss")
     parser.add_argument("--lambda_cm", type=float, default=0.25, help="Weight for InfoNCE contrastive loss")
     parser.add_argument("--lambda_metric", type=float, default=0.25, help="Retrieval score fusion lambda")
-    parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--num_workers", type=int, default=None)
     parser.add_argument("--eval_interval", type=int, default=5, help="Evaluate every N epochs")
-    parser.add_argument("--log_interval", type=int, default=50, help="Print progress every N steps")
+    parser.add_argument("--log_interval", type=int, default=25, help="Print progress every N steps")
     parser.add_argument("--debug_samples", type=int, default=None, help="Debug: limit training samples")
     parser.add_argument("--val_subset", type=int, default=None, help="Debug: limit validation samples")
     parser.add_argument("--no_preload", action="store_true", help="Disable RAM caching of image bytes")
     parser.add_argument("--no_pretrained", action="store_true", help="Initialize backbone with random weights (for offline testing)")
     parser.add_argument("--save_dir", type=str, default="checkpoints")
     parser.add_argument("--output_zip", type=str, default="submissions/EXP-006_submission.zip")
+    parser.add_argument("--exp_id", type=str, default="EXP-006")
     args = parser.parse_args()
 
-    device = get_device()
-    print("=" * 80)
-    print("EXP-006: STANDALONE END-TO-END METRIC LEARNING & ATTRIBUTE RECOGNITION")
-    print(f"Device: {device} | Total Epochs: {args.epochs} | Batch Size: {args.batch_size}")
-    print("=" * 80)
+    # Initialize DistributedDataParallel if launched via torchrun
+    is_distributed, rank, world_size, local_rank = setup_distributed()
+    is_master = (rank == 0)
 
-    # 1. Resolve dataset and stage to ultra-fast NVMe if running on Kaggle FUSE storage
+    if torch.cuda.is_available():
+        device = torch.device(f"cuda:{local_rank}")
+        torch.cuda.set_device(device)
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+
+    if is_master:
+        print("=" * 80)
+        print(f"[{args.exp_id}] STANDALONE END-TO-END METRIC LEARNING & ATTRIBUTE RECOGNITION")
+        if is_distributed:
+            print(f"[{args.exp_id}] Distributed Engine Activated: {world_size}x GPUs (DDP with NCCL backend)")
+            print(f"[{args.exp_id}] Primary GPU: {torch.cuda.get_device_name(local_rank)} (Rank {rank}/{world_size})")
+        else:
+            print(f"[{args.exp_id}] Single-Device Engine Activated: {device}")
+        print(f"[{args.exp_id}] Effective Global Batch Size: {args.batch_size * world_size} | Epochs: {args.epochs}")
+        print("=" * 80, flush=True)
+
+    # 1. Resolve dataset root (NO FUSE staging / NO cp -r)
     resolved_root = resolve_data_root(args.data_root)
-    resolved_root = stage_dataset_to_fast_local_storage(resolved_root)
-    print(f"Data Root active at: {resolved_root}")
+    if is_master:
+        print(f"[{args.exp_id}] Dataset Root resolved to: {resolved_root}")
 
     # 2. Platt calibration parameters
     calib_candidates = [
@@ -413,91 +646,134 @@ def main() -> None:
         calib = np.load(calib_file)
         platt_t = calib["T_005"]
         platt_b = calib["b_005"]
-        print(f"Loaded Platt calibration parameters from: {calib_file}")
+        if is_master:
+            print(f"[{args.exp_id}] Loaded Platt calibration parameters from: {calib_file}")
     else:
         platt_t = np.array([1.5287, 1.9120, 1.4530, 1.0267, 1.7007, 1.4921, 1.5512, 1.3312, 1.2643, 1.3411, 1.4912, 1.5231, 1.3482, 1.6021, 1.6432, 1.6082, 1.4451, 1.3452, 1.6071, 1.5291, 1.1451, 1.1952, 1.2341, 1.4481, 1.5781, 1.3352, 1.6441, 1.6571, 1.6352, 1.5221, 1.4601, 1.6131, 1.5081, 1.0362, 1.2691, 1.2381, 1.3621, 1.4771, 1.4691, 1.3241], dtype=np.float32)
         platt_b = np.array([2.7781, 0.9276, 1.4545, 1.4719, 1.1888, 1.1121, 1.6231, 1.1541, 1.1921, 1.2191, 1.4131, 1.4721, 1.2481, 1.5431, 1.5841, 1.5491, 1.3711, 1.2441, 1.5481, 1.4641, 1.1741, 1.1631, 1.2041, 1.3831, 1.5081, 1.2441, 1.5861, 1.5991, 1.5781, 1.4611, 1.3971, 1.5551, 1.4441, 0.9711, 1.1831, 1.1671, 1.2981, 1.4131, 1.4041, 1.2631], dtype=np.float32)
-        print("Using hardcoded default Platt calibration parameters.")
+        if is_master:
+            print(f"[{args.exp_id}] Using hardcoded default Platt calibration parameters.")
 
     # 3. Load dataset
-    print("\n[Step 1/4] Initializing UPAR End-to-End Dataset...")
+    if is_master:
+        print(f"\n[Step 1/4] Initializing UPAR End-to-End Dataset...", flush=True)
+
     train_dataset = UPAREndToEndDataset(
         data_root=resolved_root,
+        preload_to_ram=not args.no_preload,
         debug_samples=args.debug_samples,
+        is_master=is_master,
     )
-    print(f"Loaded {len(train_dataset)} training samples.")
 
-    nw = args.num_workers if os.name != "nt" else 0
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=nw,
-        pin_memory=(device.type == "cuda"),
-        drop_last=(len(train_dataset) > args.batch_size),
-        persistent_workers=(nw > 0),
-        prefetch_factor=2 if nw > 0 else None,
-    )
+    if is_master:
+        print(f"[{args.exp_id}] Loaded {len(train_dataset)} training samples.")
+
+    # Sampler: use DomainBalancedBatchSampler if full dataset, fallback to standard sampler if small debug subset
+    if args.debug_samples is not None and len(train_dataset) < args.batch_size * world_size:
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=args.batch_size,
+            shuffle=True,
+            num_workers=0,
+            pin_memory=(device.type == "cuda"),
+        )
+        batch_sampler = None
+    else:
+        batch_sampler = DomainBalancedBatchSampler(
+            domain_ids=train_dataset.domain_ids,
+            batch_size=args.batch_size,
+            rank=rank,
+            world_size=world_size,
+        )
+        nw = args.num_workers if args.num_workers is not None else (2 if is_distributed else 4)
+        if os.name == "nt" or sys.platform == "darwin":
+            nw = 0
+
+        train_loader = DataLoader(
+            train_dataset,
+            batch_sampler=batch_sampler,
+            num_workers=nw,
+            pin_memory=(device.type == "cuda"),
+            persistent_workers=(nw > 0),
+            prefetch_factor=2 if nw > 0 else None,
+        )
+
+    if is_master:
+        print(f"[{args.exp_id}] Batches per Epoch per Rank: {len(train_loader)} | DataLoader Workers: {train_loader.num_workers}", flush=True)
 
     # 4. Load validation data
-    print("\n[Step 2/4] Loading Task 2 Retrieval Validation Data...")
-    retrieval_data = Task2RetrievalEvalData(data_root=resolved_root)
-    print(f"Loaded {len(retrieval_data.gallery_paths)} gallery images and {len(retrieval_data.queries)} queries.")
+    if is_master:
+        print(f"\n[Step 2/4] Loading Task 2 Retrieval Validation Data...", flush=True)
+        retrieval_data = Task2RetrievalEvalData(data_root=resolved_root)
+        print(f"[{args.exp_id}] Loaded {len(retrieval_data.gallery_paths)} gallery images and {len(retrieval_data.queries)} queries.", flush=True)
+    else:
+        retrieval_data = None
 
     # 5. Build Model & Losses
-    print("\n[Step 3/4] Building SwinPARMetric Architecture & Multi-Task Losses...")
-    model = SwinPARMetric(
+    if is_master:
+        print(f"\n[Step 3/4] Building SwinPARMetric Architecture & Multi-Task Losses...", flush=True)
+
+    raw_model = SwinPARMetric(
         num_attributes=40,
         embedding_dim=512,
+        num_identities=7204,
+        scale=args.scale,
+        margin=args.margin,
         pretrained=not args.no_pretrained,
         dropout=0.3,
     ).to(device)
 
+    if is_distributed:
+        model = nn.parallel.DistributedDataParallel(
+            raw_model,
+            device_ids=[local_rank],
+            output_device=local_rank,
+            find_unused_parameters=False,
+        )
+    else:
+        model = raw_model
+
     # Losses
     asl_loss_fn = AsymmetricLoss(gamma_neg=4.0, gamma_pos=0.0, clip=0.05).to(device)
     group_loss_fn = CategorySoftmaxLoss(group_weight=0.5).to(device)
-    arcface_loss_fn = ArcFaceLoss(
-        num_classes=7204,
-        embedding_dim=512,
-        scale=args.scale,
-        margin=args.margin,
-    ).to(device)
     contrastive_loss_fn = CrossModalContrastiveLoss(temperature=0.07).to(device)
 
-    # Multi-GPU support if available
-    num_gpus = torch.cuda.device_count()
-    if num_gpus > 1 and device.type == "cuda":
-        print(f"Enabling DataParallel across {num_gpus} GPUs!")
-        # Notice: Keep ArcFace on primary cuda:0 device for single class-center matrix
-        model.backbone = nn.DataParallel(model.backbone)
-
     # Optimizer with differential learning rates
-    optimizer = torch.optim.AdamW(
+    opt_model = model.module if is_distributed else model
+    optimizer = AdamW(
         [
-            {"params": model.backbone.parameters(), "lr": args.lr_backbone},
-            {"params": model.classifier.parameters(), "lr": args.lr_heads},
-            {"params": model.vis_projector.parameters(), "lr": args.lr_heads},
-            {"params": model.query_encoder.parameters(), "lr": args.lr_heads},
-            {"params": arcface_loss_fn.parameters(), "lr": args.lr_heads},
+            {"params": opt_model.backbone.parameters(), "lr": args.lr_backbone},
+            {"params": opt_model.classifier.parameters(), "lr": args.lr_heads},
+            {"params": opt_model.vis_projector.parameters(), "lr": args.lr_heads},
+            {"params": opt_model.query_encoder.parameters(), "lr": args.lr_heads},
+            {"params": opt_model.arcface.parameters(), "lr": args.lr_heads},
         ],
         weight_decay=args.weight_decay,
     )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-5)
+    scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=args.min_lr)
     scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda"))
 
     # 6. Training Loop
-    print("\n[Step 4/4] Starting End-to-End Multi-Task Training...")
+    if is_master:
+        print(f"\n[Step 4/4] Starting End-to-End Multi-Task Training ({args.epochs} epochs)...", flush=True)
+
     best_madm = 0.0
     os.makedirs(args.save_dir, exist_ok=True)
+    total_batches = len(train_loader)
+    last_epoch_sec: Optional[float] = None
+    last_val_sec: Optional[float] = None
 
     for epoch in range(1, args.epochs + 1):
-        model.train()
-        arcface_loss_fn.train()
+        if batch_sampler is not None and hasattr(batch_sampler, "set_epoch"):
+            batch_sampler.set_epoch(epoch)
 
-        total_loss = 0.0
-        total_asl = 0.0
-        total_arc = 0.0
-        total_cm = 0.0
+        model.train()
+        running_loss = 0.0
+        running_asl = 0.0
+        running_grp = 0.0
+        running_arc = 0.0
+        running_cm = 0.0
+        total_samples = 0
         t0 = time.time()
 
         for batch_idx, (imgs, labels, idents, query_vecs) in enumerate(train_loader):
@@ -505,19 +781,17 @@ def main() -> None:
             labels = labels.to(device, non_blocking=True)
             idents = idents.to(device, non_blocking=True)
             query_vecs = query_vecs.to(device, non_blocking=True)
+            bs = imgs.size(0)
 
             optimizer.zero_grad()
 
             with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=(device.type == "cuda")):
-                feats, logits, vis_embs = model.forward_image(imgs)
-                q_embs = model.forward_query(query_vecs)
+                logits, vis_embs, q_embs, arc_loss = model(imgs, query_vecs, ident_labels=idents)
 
                 loss_asl = asl_loss_fn(logits, labels)
                 loss_grp = group_loss_fn(logits, labels)
-                loss_arc = arcface_loss_fn(vis_embs, idents)
                 loss_cm = contrastive_loss_fn(q_embs, vis_embs)
-
-                loss = loss_asl + 0.5 * loss_grp + args.lambda_arc * loss_arc + args.lambda_cm * loss_cm
+                loss = loss_asl + 0.5 * loss_grp + args.lambda_arc * arc_loss + args.lambda_cm * loss_cm
 
             if device.type == "cuda":
                 scaler.scale(loss).backward()
@@ -530,44 +804,61 @@ def main() -> None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
                 optimizer.step()
 
-            bs = imgs.size(0)
-            total_loss += loss.item() * bs
-            total_asl += loss_asl.item() * bs
-            total_arc += loss_arc.item() * bs
-            total_cm += loss_cm.item() * bs
+            running_loss += loss.item() * bs
+            running_asl += loss_asl.item() * bs
+            running_grp += loss_grp.item() * bs
+            running_arc += arc_loss.item() * bs
+            running_cm += loss_cm.item() * bs
+            total_samples += bs
 
-            if (batch_idx + 1) % args.log_interval == 0 or (batch_idx + 1) == len(train_loader):
-                elapsed_batch = time.time() - t0
-                speed = (batch_idx + 1) * bs / max(elapsed_batch, 0.1)
+            # Real-time stdout progress logging
+            if is_master and ((batch_idx + 1) % args.log_interval == 0 or (batch_idx + 1) == total_batches):
+                elapsed_b = time.time() - t0
+                speed = total_samples * world_size / max(elapsed_b, 0.1)
+                pct = ((batch_idx + 1) / total_batches) * 100
+                batches_left = total_batches - (batch_idx + 1)
+                sec_per_batch = elapsed_b / (batch_idx + 1)
+                step_eta_sec = batches_left * sec_per_batch
+
+                epochs_remaining = args.epochs - epoch
+                est_epoch_sec = last_epoch_sec if last_epoch_sec is not None else (sec_per_batch * total_batches)
+                total_eta_sec = step_eta_sec + epochs_remaining * est_epoch_sec
+                if last_val_sec is not None:
+                    total_eta_sec += (epochs_remaining // max(args.eval_interval, 1)) * last_val_sec
+
+                vram_str = get_memory_info(device)
                 print(
-                    f"  Epoch [{epoch:02d}/{args.epochs:02d}] Step [{batch_idx+1:04d}/{len(train_loader):04d}] | "
-                    f"Loss: {loss.item():.4f} (ASL: {loss_asl.item():.4f}, Arc: {loss_arc.item():.4f}, CM: {loss_cm.item():.4f}) | "
-                    f"Speed: {speed:.1f} img/s",
+                    f"[{args.exp_id}] Epoch [{epoch:02d}/{args.epochs:02d}] | "
+                    f"Batch [{batch_idx+1:04d}/{total_batches:04d}] ({pct:5.1f}%) | "
+                    f"Loss: {loss.item():.4f} (ASL: {loss_asl.item():.4f}, Grp: {loss_grp.item():.4f}, Arc: {arc_loss.item():.4f}, CM: {loss_cm.item():.4f}) | "
+                    f"Speed: {speed:6.1f} img/s | Step ETA: {format_duration(step_eta_sec)} | Total ETA: {format_duration(total_eta_sec)} | {vram_str}",
                     flush=True,
                 )
 
         scheduler.step()
-        n_samples = len(train_dataset)
-        elapsed = time.time() - t0
-        print(
-            f"Epoch [{epoch:02d}/{args.epochs:02d}] | "
-            f"Loss: {total_loss/n_samples:.4f} (ASL: {total_asl/n_samples:.4f}, Arc: {total_arc/n_samples:.4f}, CM: {total_cm/n_samples:.4f}) | "
-            f"LR: {scheduler.get_last_lr()[0]:.2e} | Time: {elapsed:.1f}s",
-            flush=True,
-        )
+        epoch_sec = time.time() - t0
+        last_epoch_sec = epoch_sec
+        curr_lr = optimizer.param_groups[0]["lr"]
+
+        if is_master:
+            mean_loss = running_loss / max(total_samples, 1)
+            mean_asl = running_asl / max(total_samples, 1)
+            mean_grp = running_grp / max(total_samples, 1)
+            mean_arc = running_arc / max(total_samples, 1)
+            mean_cm = running_cm / max(total_samples, 1)
+            print(
+                f"[{args.exp_id}] Epoch {epoch:02d}/{args.epochs:02d} Complete | "
+                f"Loss: {mean_loss:.4f} (ASL: {mean_asl:.4f}, Grp: {mean_grp:.4f}, Arc: {mean_arc:.4f}, CM: {mean_cm:.4f}) | "
+                f"LR: {curr_lr:.2e} | Duration: {format_duration(epoch_sec)}",
+                flush=True,
+            )
 
         # Validation check
         should_val = (epoch % args.eval_interval == 0) or (epoch == args.epochs) or (args.debug_samples is not None)
-        if should_val:
-            print(f"--- Running Validation for Epoch {epoch} ---", flush=True)
-            # Unwrap DataParallel if needed for validation
-            eval_model = model
-            if isinstance(model.backbone, nn.DataParallel):
-                eval_model = SwinPARMetric(num_attributes=40, embedding_dim=512, pretrained=False).to(device)
-                eval_model.backbone.load_state_dict(model.backbone.module.state_dict())
-                eval_model.classifier.load_state_dict(model.classifier.state_dict())
-                eval_model.vis_projector.load_state_dict(model.vis_projector.state_dict())
-                eval_model.query_encoder.load_state_dict(model.query_encoder.state_dict())
+        if should_val and is_master:
+            print(f"\n[{args.exp_id}] Running Task 2 retrieval validation (33,407 gallery, 3,462 queries)...", flush=True)
+            t_val_start = time.time()
+            eval_model = model.module if is_distributed else model
 
             metrics = run_validation(
                 model=eval_model,
@@ -577,29 +868,37 @@ def main() -> None:
                 platt_b=platt_b,
                 lambda_metric=args.lambda_metric,
                 val_subset=args.val_subset,
-                batch_size=64,
+                batch_size=args.val_batch_size,
             )
-            print(
-                f"   [Validation λ={args.lambda_metric:.2f}] -> "
-                f"mADM: {metrics['mADM']:.4f} | mAP: {metrics['mAP']:.4f} | "
-                f"Rank-1: {metrics['Rank-1']*100:.2f}% | Rank-5: {metrics['Rank-5']*100:.2f}% | mINP: {metrics['mINP']:.4f}",
-                flush=True,
+            val_sec = time.time() - t_val_start
+            last_val_sec = val_sec
+            current_madm = metrics["mADM"]
+            is_best = current_madm > best_madm
+
+            # Print official Codabench results table
+            print_codabench_table(
+                epoch=epoch,
+                epochs=args.epochs,
+                metrics=metrics,
+                exp_id=args.exp_id,
+                participant="Jyothiradithya Lingam",
+                is_best=is_best,
             )
 
             # Checkpoint saving
-            if metrics["mADM"] > best_madm or args.debug_samples is not None:
-                best_madm = metrics["mADM"]
-                best_bb_path = os.path.join(args.save_dir, "EXP-006_best_backbone.pth")
-                best_mh_path = os.path.join(args.save_dir, "EXP-006_best_metric_heads.pth")
+            if is_best or best_madm == 0.0:
+                best_madm = current_madm
+                best_bb_path = os.path.join(args.save_dir, f"{args.exp_id}_best_backbone.pth")
+                best_mh_path = os.path.join(args.save_dir, f"{args.exp_id}_best_metric_heads.pth")
 
                 bb_sd = eval_model.get_backbone_state_dict()
                 mh_sd = eval_model.get_metric_heads_state_dict()
 
                 torch.save(bb_sd, best_bb_path)
                 torch.save(mh_sd, best_mh_path)
-                print(f"   [Checkpoint] New peak mADM: {best_madm:.4f}! Saved checkpoints to {args.save_dir}")
+                print(f"[{args.exp_id}] *** Saved best checkpoints to {args.save_dir} (mADM: {best_madm:.4f}) ***")
 
-                # Automatically package submission
+                # Package submission zip automatically
                 package_submission(
                     model=eval_model,
                     output_zip=args.output_zip,
@@ -608,10 +907,28 @@ def main() -> None:
                     platt_b=platt_b.tolist(),
                 )
 
-    print(f"\n================================================================================")
-    print(f"EXP-006 End-to-End Training Completed! Peak Validation mADM: {best_madm:.4f}")
-    print(f"Final Submission Zip: {args.output_zip}")
-    print(f"================================================================================")
+        # Synchronize DDP processes after validation
+        if is_distributed:
+            torch.distributed.barrier()
+
+    if is_master:
+        if not os.path.exists(args.output_zip):
+            eval_model = model.module if is_distributed else model
+            package_submission(
+                model=eval_model,
+                output_zip=args.output_zip,
+                lambda_metric=args.lambda_metric,
+                platt_t=platt_t.tolist(),
+                platt_b=platt_b.tolist(),
+            )
+
+        print("\n" + "=" * 80)
+        print(f"[{args.exp_id}] Master End-to-End Pipeline Completed Successfully!")
+        print(f"[{args.exp_id}] Peak Validation mADM: {best_madm:.4f}")
+        print(f"[{args.exp_id}] Final Standalone Codabench Zip: {args.output_zip}")
+        print("=" * 80 + "\n")
+
+    cleanup_distributed()
 
 
 if __name__ == "__main__":
