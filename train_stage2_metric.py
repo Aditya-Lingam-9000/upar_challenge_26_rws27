@@ -73,8 +73,10 @@ def load_task2_train_annotations(data_root: str) -> tuple[np.ndarray, np.ndarray
 
 def main():
     parser = argparse.ArgumentParser(description="Stage 2 Metric Learning Training")
-    parser.add_argument("--model", type=str, default="convnext_tiny", choices=["convnext_tiny", "swin_t"])
+    parser.add_argument("--model", type=str, default="convnext_tiny", choices=["convnext_tiny", "swin_t", "dual_fused"])
     parser.add_argument("--submission_zip", type=str, default="submissions/EXP-004_submission.zip")
+    parser.add_argument("--convnext_zip", type=str, default="submissions/EXP-004_submission.zip")
+    parser.add_argument("--swin_zip", type=str, default="submissions/EXP-005A_submission.zip")
     parser.add_argument("--data_root", type=str, default="UPAR-Challenge-2027/data")
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch_size", type=int, default=512)
@@ -95,57 +97,96 @@ def main():
     data_root = resolve_data_root(args.data_root)
 
     os.makedirs("checkpoints", exist_ok=True)
-    train_feat_cache = f"checkpoints/train_feats_{args.model}.npy"
-    val_feat_cache = f"checkpoints/val_feats_{args.model}.npy"
-    val_logit_cache = f"checkpoints/val_logits_{args.model}.npy"
-
-    # 1. Feature Extraction / Loading
     train_csv = os.path.join(data_root, "annotations", "train.csv")
     val_csv = os.path.join(data_root, "annotations", "val.csv")
 
-    if not os.path.exists(train_feat_cache):
-        print(f"\n[1/4] Extracting training features using {args.model}...")
-        model = load_model_for_extraction(args.submission_zip, args.model, device)
-        train_ds = UPARDataset(csv_path=train_csv, data_root=data_root, height=256, width=128, is_train=False)
-        train_loader = DataLoader(train_ds, batch_size=128, shuffle=False, num_workers=0)
-        train_feats, _ = extract_dataset_features_and_logits(model, train_loader, device)
-        np.save(train_feat_cache, train_feats)
-        print(f"Saved {train_feats.shape} training features to {train_feat_cache}")
-        del train_ds, train_loader
-    else:
-        print(f"\n[1/4] Loading cached training features from {train_feat_cache}...")
-        train_feats = np.load(train_feat_cache)
+    calib = np.load("checkpoints/stage1_calibration_params.npz")
+    T_004, b_004 = calib["T_004"], calib["b_004"]
+    T_005, b_005 = calib["T_005"], calib["b_005"]
 
-    if not os.path.exists(val_feat_cache) or not os.path.exists(val_logit_cache):
-        print(f"\n[2/4] Extracting validation features and logits using {args.model}...")
-        model = load_model_for_extraction(args.submission_zip, args.model, device)
-        val_ds = UPARDataset(csv_path=val_csv, data_root=data_root, height=256, width=128, is_train=False)
-        val_loader = DataLoader(val_ds, batch_size=128, shuffle=False, num_workers=0)
-        val_feats, val_logits = extract_dataset_features_and_logits(model, val_loader, device)
-        np.save(val_feat_cache, val_feats)
-        np.save(val_logit_cache, val_logits)
-        print(f"Saved {val_feats.shape} val features and {val_logits.shape} val logits.")
-        del val_ds, val_loader
+    if args.model == "dual_fused":
+        print("\n[Mode] DUAL-STREAM FUSED BACKBONE (ConvNeXt-Tiny + Swin-T -> 1536-D)")
+        train_feat_cache_c = "checkpoints/train_feats_convnext_tiny.npy"
+        val_feat_cache_c = "checkpoints/val_feats_convnext_tiny.npy"
+        val_logit_cache_c = "checkpoints/val_logits_convnext_tiny.npy"
+
+        train_feat_cache_s = "checkpoints/train_feats_swin_t.npy"
+        val_feat_cache_s = "checkpoints/val_feats_swin_t.npy"
+        val_logit_cache_s = "checkpoints/val_logits_swin_t.npy"
+
+        # 1. Load ConvNeXt features
+        if not os.path.exists(train_feat_cache_c):
+            raise FileNotFoundError(f"Missing {train_feat_cache_c}. Run extraction on ConvNeXt first.")
+        train_feats_c = np.load(train_feat_cache_c)
+        val_feats_c = np.load(val_feat_cache_c)
+        val_logits_c = np.load(val_logit_cache_c)
+
+        # 2. Load Swin-T features
+        if not os.path.exists(train_feat_cache_s):
+            raise FileNotFoundError(f"Missing {train_feat_cache_s}. Run extraction on Swin-T first.")
+        train_feats_s = np.load(train_feat_cache_s)
+        val_feats_s = np.load(val_feat_cache_s)
+        val_logits_s = np.load(val_logit_cache_s)
+
+        # 3. Concatenate into 1536-D representation
+        train_feats = np.concatenate([train_feats_c, train_feats_s], axis=1)  # (97669, 1536)
+        val_feats = np.concatenate([val_feats_c, val_feats_s], axis=1)        # (33407, 1536)
+        in_features = 1536
+        print(f"Fused Features: Train {train_feats.shape}, Val {val_feats.shape}")
+
+        # Compute calibrated ensemble probabilities (50/50 blend)
+        p_c = 1.0 / (1.0 + np.exp(-np.clip((val_logits_c - b_004[None, :]) / T_004[None, :], -20.0, 20.0)))
+        p_s = 1.0 / (1.0 + np.exp(-np.clip((val_logits_s - b_005[None, :]) / T_005[None, :], -20.0, 20.0)))
+        calib_val_probs = 0.50 * p_c + 0.50 * p_s
+
     else:
-        print(f"\n[2/4] Loading cached validation features from {val_feat_cache}...")
-        val_feats = np.load(val_feat_cache)
-        val_logits = np.load(val_logit_cache)
+        train_feat_cache = f"checkpoints/train_feats_{args.model}.npy"
+        val_feat_cache = f"checkpoints/val_feats_{args.model}.npy"
+        val_logit_cache = f"checkpoints/val_logits_{args.model}.npy"
+        in_features = 768
+
+        if not os.path.exists(train_feat_cache):
+            print(f"\n[1/4] Extracting training features using {args.model}...")
+            model = load_model_for_extraction(args.submission_zip, args.model, device)
+            train_ds = UPARDataset(csv_path=train_csv, data_root=data_root, height=256, width=128, is_train=False)
+            train_loader = DataLoader(train_ds, batch_size=128, shuffle=False, num_workers=0)
+            train_feats, _ = extract_dataset_features_and_logits(model, train_loader, device)
+            np.save(train_feat_cache, train_feats)
+            print(f"Saved {train_feats.shape} training features to {train_feat_cache}")
+            del train_ds, train_loader
+        else:
+            print(f"\n[1/4] Loading cached training features from {train_feat_cache}...")
+            train_feats = np.load(train_feat_cache)
+
+        if not os.path.exists(val_feat_cache) or not os.path.exists(val_logit_cache):
+            print(f"\n[2/4] Extracting validation features and logits using {args.model}...")
+            model = load_model_for_extraction(args.submission_zip, args.model, device)
+            val_ds = UPARDataset(csv_path=val_csv, data_root=data_root, height=256, width=128, is_train=False)
+            val_loader = DataLoader(val_ds, batch_size=128, shuffle=False, num_workers=0)
+            val_feats, val_logits = extract_dataset_features_and_logits(model, val_loader, device)
+            np.save(val_feat_cache, val_feats)
+            np.save(val_logit_cache, val_logits)
+            print(f"Saved {val_feats.shape} val features and {val_logits.shape} val logits.")
+            del val_ds, val_loader
+        else:
+            print(f"\n[2/4] Loading cached validation features from {val_feat_cache}...")
+            val_feats = np.load(val_feat_cache)
+            val_logits = np.load(val_logit_cache)
+
+        T_param = T_004 if "convnext" in args.model else T_005
+        b_param = b_004 if "convnext" in args.model else b_005
+        calib_val_probs = 1.0 / (1.0 + np.exp(-np.clip((val_logits - b_param[None, :]) / T_param[None, :], -20.0, 20.0)))
 
     # Load annotations
     print("\n[3/4] Loading Task 2 Identity and Query annotations...")
     train_ids, train_queries = load_task2_train_annotations(data_root)
     num_classes = len(np.unique(train_ids))
     print(f"Loaded {len(train_ids)} training samples across {num_classes} unique identity classes.")
-
     retrieval_data = Task2RetrievalEvalData(data_root=data_root)
-    calib = np.load("checkpoints/stage1_calibration_params.npz")
-    T_param = calib["T_004"] if "convnext" in args.model else calib["T_005"]
-    b_param = calib["b_004"] if "convnext" in args.model else calib["b_005"]
-    calib_val_probs = 1.0 / (1.0 + np.exp(-np.clip((val_logits - b_param[None, :]) / T_param[None, :], -20.0, 20.0)))
 
     # 2. Build Models and Optimizers
     print("\n[4/4] Initializing Stage 2 Metric Learning Networks...")
-    vis_projector = VisualProjector(in_features=768, embedding_dim=512, dropout=0.1).to(device)
+    vis_projector = VisualProjector(in_features=in_features, embedding_dim=512, dropout=0.1).to(device)
     query_encoder = QueryEncoder(num_attributes=40, embedding_dim=512, dropout=0.1).to(device)
     arcface_loss_fn = ArcFaceLoss(
         num_classes=num_classes,

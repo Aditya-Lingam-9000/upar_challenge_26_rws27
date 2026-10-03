@@ -890,15 +890,61 @@
 
 ---
 
+### Step 38: Stage 2 ConvNeXt Metric Learning Empirical Breakthrough
+- **Date / Timestamp:** 2026-10-03 11:35
+- **What Was Done:**
+  - **Completed Stage 2 Single-Model Metric Training Run (`task-2749`):**
+    - Extracted 97,669 training features and 33,407 validation features from ConvNeXt-Tiny (`EXP-004`).
+    - Trained `VisualProjector` and `QueryEncoder` over 30 epochs with ArcFace ($s=30, m=0.20$) and InfoNCE contrastive loss.
+    - Evaluated retrieval across $\lambda \in [0.0, 0.15, 0.25, 0.35]$ on all 33,407 validation gallery images.
+  - **Empirical Breakthrough Results:**
+    - Baseline (No metric learning, $\lambda = 0.00$): mADM 0.5899, mAP 0.1250, Rank-1 17.07%, Rank-5 27.04%, mINP 0.0545.
+    - Metric-Guided ($\lambda = 0.25$): **mADM 0.6218** (+0.0319), **mAP 0.1640** (+31.2%), **Rank-1 19.64%** (+2.57%), **Rank-5 33.91%** (+6.87%), **mINP 0.0832** (+52.7%).
+    - Peak Rank-1 ($\lambda = 0.35$): **Rank-1 broke 20% to reach 20.13%**, confirming that continuous metric embeddings successfully break 40-bit crowding ties.
+  - **Saved Model Artifact:**
+    - Best checkpoint saved to [`checkpoints/stage2_metric_heads.pth`](file:///Users/sama/D/RWS2027/checkpoints/stage2_metric_heads.pth).
+- **What Changed / Created:**
+  - Saved [`checkpoints/stage2_metric_heads.pth`](file:///Users/sama/D/RWS2027/checkpoints/stage2_metric_heads.pth).
+  - Updated [`STEP_TRACKER.md`](file:///Users/sama/D/RWS2027/STEP_TRACKER.md).
+- **Why It Changed / Rationale:**
+  - Confirms the fundamental hypothesis of Stage 2: visual metric learning elevates person identification metrics (mAP, Rank-1, Rank-5) dramatically, breaking the 40-attribute ceiling even on a single backbone.
+
+---
+
+### Step 39: Full 1536-D Dual-Stream Fused Architecture Pipeline Execution (Option B)
+- **Date / Timestamp:** 2026-10-03 11:37
+- **What Was Done:**
+  - **User Approved Option B Execution:**
+    - Authorized proceeding with full dual-stream pipeline aligning directly with the flowchart architecture.
+  - **Engineered Master Stage 2 Pipeline Runner (`run_stage2_full_pipeline.py`):**
+    - Step 1: Extracts Swin-T 768-D features across 97,669 training and 33,407 validation gallery images, and trains Swin-T Stage 2 baseline (`checkpoints/stage2_swin_metric_heads.pth`).
+    - Step 2: Concatenates ConvNeXt-Tiny (768-D) + Swin-T (768-D) into the fused $F_v \in \mathbb{R}^{1536}$ representation.
+    - Step 3: Trains 1536-D `VisualProjector` and Dual-Branch `QueryEncoder` (`[E_h || E_s] \in \mathbb{R}^{512}`) with ArcFace ($s=30, m=0.20$) and InfoNCE contrastive loss over 30 epochs.
+    - Step 4: Evaluates retrieval across $\lambda \in [0.0, 0.15, 0.25, 0.35]$ on all 33,407 validation gallery images.
+  - **Launched Master Execution (`task-2833`):**
+    - Executing on Apple Silicon MPS with full RAM caching.
+- **What Changed / Created:**
+  - Created [`run_stage2_full_pipeline.py`](file:///Users/sama/D/RWS2027/run_stage2_full_pipeline.py).
+  - Updated [`train_stage2_metric.py`](file:///Users/sama/D/RWS2027/train_stage2_metric.py) to support `--model dual_fused`.
+  - Updated [`src/metric_learning.py`](file:///Users/sama/D/RWS2027/src/metric_learning.py) with dual-branch `QueryEncoder`.
+  - Updated [`STEP_TRACKER.md`](file:///Users/sama/D/RWS2027/STEP_TRACKER.md).
+- **Why It Changed / Rationale:**
+  - Implements the complete unified vision from the user's flowchart, combining convolutional texture features with transformer non-local self-attention in a joint 1536-D metric space to maximize retrieval mADM and Rank-1.
+
+---
+
 ## Next Steps Roadmap
-1. **Monitor Stage 2 Training Progress:**
-   - Complete feature extraction and train 30 epochs of ArcFace + Contrastive loss on `EXP-004` (ConvNeXt-Tiny) and `EXP-005` (Swin-T).
-   - Evaluate hybrid retrieval gains across $\lambda_{\text{metric}}$ weights on all 33,407 validation gallery images.
-2. **Package Stage 2 Championship Submission:**
-   - Package trained `VisualProjector` and `QueryEncoder` weights into submission archive.
-   - Run sandbox container simulation test to ensure CPU ingestion completes well within Codabench limits.
-3. **Deploy on Kaggle Dual Tesla T4:**
-   - Run `notebooks/kaggle_exp006_stage2_metric_learning.ipynb` to verify distributed multi-GPU training and extract cross-architecture embeddings.
+1. **Monitor Pipeline Completion:**
+   - Await completion of Swin-T extraction and 1536-D Dual-Stream training.
+2. **Compile Final Grand Comparative Scorecard:**
+   - Report before-and-after metrics across all configurations:
+     - EXP-004 Raw vs Calibrated vs Stage 2 Metric
+     - EXP-005 Raw vs Calibrated vs Stage 2 Metric
+     - Full 1536-D Dual-Stream Fused Championship Model!
+3. **Package Championship Submission:**
+   - Build `submissions/EXP-006_CHAMPIONSHIP_submission.zip` with container simulation verification.
+
+
 
 
 

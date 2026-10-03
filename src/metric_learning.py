@@ -36,22 +36,53 @@ class VisualProjector(nn.Module):
 
 
 class QueryEncoder(nn.Module):
-    """Projects 40-D attribute queries into the shared 512-D unit-hypersphere metric space."""
+    """Dual-Branch Query Representation Engine matching the Stage 2 Blueprint.
+
+    Branch 1: Hard Query MLP Adapter -> E_h in R^256 (non-linear discrete bitmask processing).
+    Branch 2: Semantic Attribute Adapter -> E_s in R^256 (continuous semantic descriptor tokens).
+    Joint Output: E_q = [E_h || E_s] in R^512, L2-normalized on the unit hypersphere.
+    """
 
     def __init__(self, num_attributes: int = 40, embedding_dim: int = 512, dropout: float = 0.1) -> None:
         super().__init__()
-        self.net = nn.Sequential(
+        assert embedding_dim % 2 == 0, "embedding_dim must be divisible by 2 for dual-branch fusion"
+        half_dim = embedding_dim // 2  # 256
+
+        # Branch 1: Hard Query MLP Adapter (E_h)
+        self.hard_mlp = nn.Sequential(
             nn.Linear(num_attributes, 256),
             nn.LayerNorm(256, eps=1e-6),
             nn.GELU(),
             nn.Dropout(p=dropout),
-            nn.Linear(256, embedding_dim),
-            nn.LayerNorm(embedding_dim, eps=1e-6),
+            nn.Linear(256, half_dim),
+            nn.LayerNorm(half_dim, eps=1e-6),
+        )
+
+        # Branch 2: Semantic Attribute Descriptor Tokens (E_s)
+        # Learns a 256-D continuous semantic representation per attribute, weighted by query activations
+        self.attr_token_embeddings = nn.Parameter(torch.randn(num_attributes, half_dim) * 0.02)
+        self.semantic_adapter = nn.Sequential(
+            nn.LayerNorm(half_dim, eps=1e-6),
+            nn.Linear(half_dim, half_dim),
+            nn.GELU(),
+            nn.Dropout(p=dropout),
+            nn.Linear(half_dim, half_dim),
+            nn.LayerNorm(half_dim, eps=1e-6),
         )
 
     def forward(self, q: torch.Tensor) -> torch.Tensor:
-        feat = self.net(q)
-        return F.normalize(feat, p=2, dim=-1)
+        # 1. Hard query branch: (B, 256)
+        e_h = self.hard_mlp(q)
+
+        # 2. Semantic attribute branch: query-weighted attribute tokens: (B, 256)
+        # q: (B, 40) -> weighted sum over (40, 256) tokens
+        attr_weights = q / (q.sum(dim=-1, keepdim=True).clamp(min=1.0))
+        semantic_pooled = torch.matmul(attr_weights, self.attr_token_embeddings)
+        e_s = self.semantic_adapter(semantic_pooled)
+
+        # 3. Concatenate into Joint Query Embedding: (B, 512)
+        e_q = torch.cat([e_h, e_s], dim=-1)
+        return F.normalize(e_q, p=2, dim=-1)
 
 
 class ArcFaceLoss(nn.Module):
