@@ -988,16 +988,28 @@
 - **Why It Changed / Rationale:**
   - Guarantees 100% server reliability with zero risk of timeout, missing dependencies, unpickling errors, or format mismatches on the Codabench server.
 
+---
 
-
-
-
-
-
-
-
-
-
-
-
-
+### Step 42: Standardized Kaggle EXP-006 Notebook & Dual-Stream Championship Architecture
+- **Date / Timestamp:** 2026-10-03 13:21
+- **What Was Done:**
+  - Standardized [`notebooks/kaggle_exp006_stage2_metric_learning.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp006_stage2_metric_learning.ipynb) to match the battle-tested layout of EXP-004 and EXP-005 notebooks:
+    1. **Cell 1: Master Configuration Dictionary (`CONFIG`)**: Centralized editable hyperparameters (`EXPERIMENT_ID`, `PIPELINE_MODE`, `STAGE2_EPOCHS`, `BATCH_SIZE`, `LEARNING_RATE`, `ARCFACE_SCALE`, `ARCFACE_MARGIN`, `LAMBDA_CONTRASTIVE`, `LAMBDA_METRIC`, `DATA_DIR`).
+    2. **Cell 2: GitHub Repository Ingestion with Token Support**: Uses `kaggle_secrets.UserSecretsClient` with fallback to clone/pull from `https://github.com/Aditya-Lingam-9000/upar_challenge_26_rws27.git`.
+    3. **Cell 3: Hardware & Dataset Path Auto-Detection**: GPU telemetry (device count, VRAM) + recursive glob detection of UPAR dataset root path.
+    4. **Cell 4: Launch Master Stage 2 Dual-Stream Pipeline**: Executes `run_stage2_full_pipeline.py --data_root ...` combining ConvNeXt-Tiny and Swin-T features into 1536-D unified representation.
+    5. **Cell 5: Package Codabench Submissions**: Invokes `src/stage2_submission_builder.py` to package both Championship Dual-Stream (`EXP-006_STAGE2_DUAL_FUSED_CHAMPIONSHIP_submission.zip`, 203.3 MB) and Safe Single-Model (`EXP-006_STAGE2_SWIN_METRIC_submission.zip`, 102.0 MB).
+    6. **Cell 6: Codabench Container Sandbox Simulation**: Runs `tests/test_codabench_simulation.py` directly inside Kaggle to guarantee zero server failures before download.
+    7. **Cell 7: One-Click Download Links**: Displays direct clickable browser links via `IPython.display.FileLink`.
+  - Added `--data_root` CLI parameter to [`run_stage2_full_pipeline.py`](file:///Users/sama/D/RWS2027/run_stage2_full_pipeline.py).
+  - Built and verified local packages:
+    - [`submissions/EXP-006_STAGE2_DUAL_FUSED_CHAMPIONSHIP_submission.zip`](file:///Users/sama/D/RWS2027/submissions/EXP-006_STAGE2_DUAL_FUSED_CHAMPIONSHIP_submission.zip) (203.3 MB, local mADM 0.6470, Rank-1 22.50%).
+    - [`submissions/EXP-006_STAGE2_SWIN_METRIC_submission.zip`](file:///Users/sama/D/RWS2027/submissions/EXP-006_STAGE2_SWIN_METRIC_submission.zip) (102.0 MB, local mADM 0.6304, Rank-1 20.57%).
+  - Committed and pushed all updates to GitHub (commit `8a25d0a`).
+- **What Changed / Created:**
+  - Updated [`notebooks/kaggle_exp006_stage2_metric_learning.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp006_stage2_metric_learning.ipynb).
+  - Updated [`run_stage2_full_pipeline.py`](file:///Users/sama/D/RWS2027/run_stage2_full_pipeline.py).
+  - Built [`submissions/EXP-006_STAGE2_DUAL_FUSED_CHAMPIONSHIP_submission.zip`](file:///Users/sama/D/RWS2027/submissions/EXP-006_STAGE2_DUAL_FUSED_CHAMPIONSHIP_submission.zip).
+  - Updated [`STEP_TRACKER.md`](file:///Users/sama/D/RWS2027/STEP_TRACKER.md).
+- **Why It Changed / Rationale:**
+  - Fulfills user's exact specification: standardized config at the top, GitHub cloning with token support, hardware/dataset auto-detection, main pipeline execution, automated packaging, sandbox verification, and direct download links while keeping the 1536-D dual-model pipeline intact.
