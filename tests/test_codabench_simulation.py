@@ -17,7 +17,7 @@ import numpy as np
 import torch
 
 WORKSPACE = "/Users/sama/D/RWS2027"
-ZIP_PATH = os.path.join(WORKSPACE, "submissions/EXP-004_submission.zip")
+ZIP_PATH = os.path.join(WORKSPACE, "submissions/EXP-006_STAGE2_SWIN_METRIC_submission.zip")
 SANDBOX_DIR = "/tmp/codabench_ingestion_container"
 VAL_DIR = os.path.join(WORKSPACE, "UPAR-Challenge-2027/data/annotations/task2/val")
 DATA_DIR = os.path.join(WORKSPACE, "UPAR-Challenge-2027/data")
@@ -114,7 +114,9 @@ def main():
     print(f"Archive contents: {files}")
     assert "run.py" in files, "Missing run.py!"
     assert "metadata.yaml" in files, "Missing metadata.yaml!"
-    assert os.path.exists(os.path.join(SANDBOX_DIR, "assets", "model.pth")), "Missing assets/model.pth!"
+    has_model_pth = os.path.exists(os.path.join(SANDBOX_DIR, "assets", "model.pth"))
+    has_stage2_pth = os.path.exists(os.path.join(SANDBOX_DIR, "assets", "model_backbone.pth")) and os.path.exists(os.path.join(SANDBOX_DIR, "assets", "metric_heads.pth"))
+    assert has_model_pth or has_stage2_pth, "Missing model weights in assets/!"
     print(">> Step 1 PASSED: Archive structure strictly compliant with Codabench.")
 
     # 2. Ingestion: Import run.py and load_model()

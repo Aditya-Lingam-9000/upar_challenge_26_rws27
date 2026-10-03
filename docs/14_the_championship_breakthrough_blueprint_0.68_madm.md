@@ -1,16 +1,16 @@
 # The Championship Breakthrough Blueprint: Staged Metric Learning, Cross-Modal Embedding & Calibrated ABPR Engine
 
-> **Target Objective:** Absolute 1st Place Victory on Codabench Track 2 (#18196)  
-> **Target Metric:** $\text{mADM} \ge 0.6800$ (Surpassing current leaderboard leader `MaxwellEQ` $0.6280$ by $+0.0520+$ points)  
-> **Status:** **ACTIONABLE CHAMPIONSHIP ARCHITECTURAL BLUEPRINT**  
-> **Companion Documents:** [`EXP_002_004_005_MULTI_EXPERIMENT_CROSS_SERVER_AUDIT.md`](file:///Users/sama/D/RWS2027/reports/EXP_002_004_005_MULTI_EXPERIMENT_CROSS_SERVER_AUDIT.md) and [`FORENSIC_ROOT_CAUSE_ANALYSIS_WHY_WE_ARE_STUCK_AT_0.43.md`](file:///Users/sama/D/RWS2027/reports/FORENSIC_ROOT_CAUSE_ANALYSIS_WHY_WE_ARE_STUCK_AT_0.43.md)  
-> **Date:** October 3, 2026  
+> **Target Objective:** Absolute 1st Place Victory on Codabench Track 2 (#18196)
+> **Target Metric:** $\text{mADM} \ge 0.6800$ (Surpassing current leaderboard leader `MaxwellEQ` $0.6280$ by $+0.0520+$ points)
+> **Status:** **ACTIONABLE CHAMPIONSHIP ARCHITECTURAL BLUEPRINT**
+> **Companion Documents:** [`EXP_002_004_005_MULTI_EXPERIMENT_CROSS_SERVER_AUDIT.md`](file:///Users/sama/D/RWS2027/reports/EXP_002_004_005_MULTI_EXPERIMENT_CROSS_SERVER_AUDIT.md) and [`FORENSIC_ROOT_CAUSE_ANALYSIS_WHY_WE_ARE_STUCK_AT_0.43.md`](file:///Users/sama/D/RWS2027/reports/FORENSIC_ROOT_CAUSE_ANALYSIS_WHY_WE_ARE_STUCK_AT_0.43.md)
+> **Date:** October 3, 2026
 
 ---
 
 ## 1. Executive Summary: The Structural Shift
 
-Our cross-experiment forensic audit revealed that training pure 40-attribute classifiers with uniform L1 distance hits an insurmountable mathematical ceiling at **$\sim 0.435\text{ mADM}$**. 
+Our cross-experiment forensic audit revealed that training pure 40-attribute classifiers with uniform L1 distance hits an insurmountable mathematical ceiling at **$\sim 0.435\text{ mADM}$**.
 
 To reach **$0.6800\text{ mADM}$**, we must discard the naive assumption that retrieval equals independent attribute classification. We transition to a **Joint Multi-Modal Metric Learning System** that synthesizes the winning methodologies of **CLEAR (Pattern Recognition 2025)**, **C2T-Net (WACV 2024)**, and **AttriVision (WACVW 2025)**.
 
@@ -60,9 +60,12 @@ The core reason our models scored $0.435$ while MaxwellEQ scored $0.628$ is that
 
 We formulate the **Hybrid Metric-Attribute Retrieval Distance**:
 
-$$D_{\text{hybrid}}(\mathbf{q}, g) = \alpha \cdot D_{\text{metric}}(E^q, E_g^v) + (1 - \alpha) \cdot D_{\text{IE-L1}}(\mathbf{q}, \hat{\mathbf{p}}_g)$$
+$$
+D_{\text{hybrid}}(\mathbf{q}, g) = \alpha \cdot D_{\text{metric}}(E^q, E_g^v) + (1 - \alpha) \cdot D_{\text{IE-L1}}(\mathbf{q}, \hat{\mathbf{p}}_g)
+$$
 
 where:
+
 1. $D_{\text{IE-L1}}(\mathbf{q}, \hat{\mathbf{p}}_g)$ is the **Inverse-Entropy Weighted Attribute Distance** (filters out the 95% irrelevant gallery candidates).
 2. $D_{\text{metric}}(E^q, E_g^v) = 1.0 - \frac{E^q \cdot E_g^v}{\|E^q\| \|E_g^v\|}$ is the **Hypersphere Cosine Distance** (breaks ties among candidates with identical attributes and locates the exact identity at Rank 1).
 3. $\alpha \in [0.35, 0.50]$ is the balancing hyperparameter tuned via validation grid search.
@@ -75,11 +78,14 @@ Uniform L1 distance treats `Age-Adult` (positive rate $89.4\%$) identically to `
 
 We define the **Inverse-Entropy Attribute Weight** $w_a$:
 
-$$w_a = -\log_2(f_a + \epsilon) \cdot \mathbb{I}(q_a == 1) + -\log_2(1.0 - f_a + \epsilon) \cdot \mathbb{I}(q_a == 0)$$
+$$
+w_a = -\log_2(f_a + \epsilon) \cdot \mathbb{I}(q_a == 1) + -\log_2(1.0 - f_a + \epsilon) \cdot \mathbb{I}(q_a == 0)
+$$
 
 where $f_a$ is the empirical prior of attribute $a$.
 
 Under IE-ADW:
+
 - Matching a rare attribute (yellow pants, baldness, sunglasses, backpack) contributes **$5.0$ to $7.0$ points** of distance compression.
 - Matching a ubiquitous attribute (adult, trousers) contributes **$0.15$ points**.
 - Prediction noise on common attributes is mathematically prevented from overwhelming the signal of rare, discriminative attributes!
@@ -92,7 +98,9 @@ Asymmetric Loss ($\gamma_- = 4.0$) distorts predicted probabilities: negative at
 
 We calibrate probabilities using post-hoc **Platt Scaling**:
 
-$$\hat{p}_{g, a} = \sigma\left(\frac{z_{g, a} - b_a}{T_a}\right)$$
+$$
+\hat{p}_{g, a} = \sigma\left(\frac{z_{g, a} - b_a}{T_a}\right)
+$$
 
 where $T_a > 0$ is a per-attribute temperature and $b_a$ is a calibration bias.
 
@@ -105,10 +113,15 @@ where $T_a > 0$ is a per-attribute temperature and $b_a$ is a calibration bias.
 
 To train the visual embedding $E_g^v$ and query embedding $E^q$ to align on the unit hypersphere:
 
-$$\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{ASL}} + \lambda_{\text{group}} \mathcal{L}_{\text{group}} + \lambda_{\text{metric}} \mathcal{L}_{\text{ArcFace}}$$
+$$
+\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{ASL}} + \lambda_{\text{group}} \mathcal{L}_{\text{group}} + \lambda_{\text{metric}} \mathcal{L}_{\text{ArcFace}}
+$$
 
 where:
-$$\mathcal{L}_{\text{ArcFace}} = -\log \frac{e^{s \cdot (\cos(\theta_y) - m)}}{e^{s \cdot (\cos(\theta_y) - m)} + \sum_{j \neq y} e^{s \cdot \cos(\theta_j)}}$$
+
+$$
+\mathcal{L}_{\text{ArcFace}} = -\log \frac{e^{s \cdot (\cos(\theta_y) - m)}}{e^{s \cdot (\cos(\theta_y) - m)} + \sum_{j \neq y} e^{s \cdot \cos(\theta_j)}}
+$$
 
 - Scale $s = 30.0$, Margin $m = 0.20$.
 - Enforces an angular separation between different identity / attribute clusters.
@@ -137,10 +150,12 @@ We divide the path to $0.6800\text{ mADM}$ into three disciplined, methodical st
 ### Stage 1: Immediate Optimization on Existing Checkpoints (Zero Re-Training)
 
 Before launching another multi-hour GPU training run, we exploit our two trained, high-performing checkpoints:
+
 - `EXP-004_best.pth` (ConvNeXt-Tiny)
 - `EXP-005A_best.pth` (Swin-T)
 
 #### Concrete Actions:
+
 1. **Fit Temperature & Bias Vectors ($T_a, b_a$):**
    - Optimize 40 temperatures and biases on our 33,407 validation gallery images to minimize ECE.
 2. **Apply Inverse-Entropy Attribute Distance Weighting (IE-ADW):**
@@ -172,9 +187,13 @@ Before launching another multi-hour GPU training run, we exploit our two trained
 
 1. **Multi-Scale Test-Time Augmentation (TTA):**
    - Symmetric horizontal flip averaging:
-     $$E_g = \frac{1}{2} [f(x) + f(\text{flip}(x))], \quad \mathbf{p}_g = \frac{1}{2} [\sigma(z(x)) + \sigma(z(\text{flip}(x)))]$$
+     $$
+     E_g = \frac{1}{2} [f(x) + f(\text{flip}(x))], \quad \mathbf{p}_g = \frac{1}{2} [\sigma(z(x)) + \sigma(z(\text{flip}(x)))]
+     $$
 2. **Hybrid Score Fusion:**
-   $$D_{\text{final}} = 0.45 \cdot D_{\text{metric}} + 0.55 \cdot D_{\text{IE-L1}}$$
+   $$
+   D_{\text{final}} = 0.45 \cdot D_{\text{metric}} + 0.55 \cdot D_{\text{IE-L1}}
+   $$
 3. **Latency Verification on Codabench Worker:**
    - Total parameters: $\approx 55\text{M}$.
    - Total FLOPs: $7.8\text{ GFLOPs}$.
