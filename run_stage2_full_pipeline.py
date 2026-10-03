@@ -29,8 +29,14 @@ def run_command_logged(cmd: list[str], desc: str) -> None:
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Stage 2 Master Pipeline Runner")
+    parser.add_argument("--data_root", type=str, default="UPAR-Challenge-2027/data", help="Root path of UPAR dataset")
+    args = parser.parse_args()
+
     print("=" * 80)
     print("STAGE 2 MASTER PIPELINE: SWIN-T & FULL 1536-D DUAL-STREAM FUSED ARCHITECTURE")
+    print(f"Data Root: {args.data_root}")
     print("=" * 80)
 
     # 1. Swin-T Stage 2 Extraction & Training
@@ -39,6 +45,7 @@ def main():
         "train_stage2_metric.py",
         "--model", "swin_t",
         "--submission_zip", "submissions/EXP-005A_submission.zip",
+        "--data_root", args.data_root,
         "--epochs", "30",
         "--batch_size", "512",
         "--lr", "0.001",
@@ -54,6 +61,7 @@ def main():
         PYTHON_BIN,
         "train_stage2_metric.py",
         "--model", "dual_fused",
+        "--data_root", args.data_root,
         "--epochs", "30",
         "--batch_size", "512",
         "--lr", "0.001",
