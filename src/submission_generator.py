@@ -27,10 +27,39 @@ def generate_run_py(
     width: int = 192,
     temperature: float = 1.0,
     use_tta: bool = False,
+    metric: str = "cosine",
 ) -> str:
     """Generate self-contained pure PyTorch run.py module."""
 
-    if "swin" in model_name.lower():
+
+    if "solider" in model_name.lower():
+        is_base = "base" in model_name.lower()
+        backbone_call = "models.swin_b(weights=None)" if is_base else "models.swin_t(weights=None)"
+        in_dim = 1024 if is_base else 768
+        model_class_def = f'''
+class SOLIDERPAR(nn.Module):
+    def __init__(self, num_attributes: int = 40):
+        super().__init__()
+        self.backbone = {backbone_call}
+        in_features = {in_dim}
+        self.backbone.head = nn.Identity()
+        self.classifier = nn.Sequential(
+            nn.LayerNorm(in_features, eps=1e-6),
+            nn.Linear(in_features, 512),
+            nn.GELU(),
+            nn.Dropout(p=0.3),
+            nn.Linear(512, num_attributes),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        features = self.backbone(x)
+        return self.classifier(features)
+
+
+def create_model_instance() -> nn.Module:
+    return SOLIDERPAR(num_attributes=40)
+'''
+    elif "swin" in model_name.lower():
         model_class_def = '''
 class SwinPAR(nn.Module):
     def __init__(self, variant: str = "tiny", num_attributes: int = 40):
@@ -317,10 +346,19 @@ def rank_gallery(sample: dict[str, Any]) -> dict[str, Any]:
 
     probs = predict_attributes(gallery, attribute_names)
 
-    # Vectorized continuous L1 distance between binary query q and probabilities p:
-    # sum_a |q_a - p_a| = sum(p) + q @ (1.0 - 2.0 * p).T
-    # Shape: (Q, G)
-    distances = probs.sum(axis=1, keepdims=True).T + queries @ (1.0 - 2.0 * probs).T
+    # Rank gallery according to chosen metric
+    if "{metric}" == "cosine":
+        # Cosine Distance on Probabilities: d(q, p) = 1.0 - (q / ||q||) @ (p / ||p||).T
+        # Eliminates unqueried negative attribute noise accumulation
+        norm_p = probs / (np.linalg.norm(probs, axis=1, keepdims=True) + 1e-8)
+        norm_q = queries / (np.linalg.norm(queries, axis=1, keepdims=True) + 1e-8)
+        distances = 1.0 - (norm_q @ norm_p.T)
+    elif "{metric}" == "asymmetric":
+        # Query-Asymmetric Distance (lambda = 0.20): Focuses on query positives
+        distances = queries @ (1.0 - probs).T + 0.20 * ((1.0 - queries) @ probs.T)
+    else:
+        # Standard L1 Distance
+        distances = probs.sum(axis=1, keepdims=True).T + queries @ (1.0 - 2.0 * probs).T
 
     # Sanitize distances: no NaN or Inf can ever fail ingestion
     distances = np.nan_to_num(distances, nan=20.0, posinf=40.0, neginf=0.0).astype(np.float32)
@@ -337,15 +375,16 @@ METADATA_YAML = """command: python3 -c "print('Submission package ready. The ing
 
 def package_submission(
     checkpoint_path: str,
-    output_zip_path: str = "submissions/EXP-003_submission.zip",
+    output_zip_path: str = "submissions/EXP-006_submission.zip",
     staging_dir: str = "submissions/staging",
     model_name: Optional[str] = None,
     height: Optional[int] = None,
     width: Optional[int] = None,
     temperature: float = 1.0,
     use_tta: bool = False,
+    metric: str = "cosine",
 ) -> str:
-    """Create Codabench zip package supporting ResNet-50 and ConvNeXt-Base."""
+    """Create Codabench zip package supporting ResNet-50, ConvNeXt, Swin, and SOLIDER."""
     os.makedirs(staging_dir, exist_ok=True)
     os.makedirs(os.path.dirname(output_zip_path), exist_ok=True)
 
@@ -358,10 +397,10 @@ def package_submission(
 
     ckpt_config = raw_ckpt.get("config", {}) if isinstance(raw_ckpt, dict) else {}
     detected_model = model_name or ckpt_config.get("model", "convnext_base")
-    detected_h = height or ckpt_config.get("height", 384 if "convnext" in detected_model else 256)
-    detected_w = width or ckpt_config.get("width", 192 if "convnext" in detected_model else 128)
+    detected_h = height or ckpt_config.get("height", 384 if "convnext_base" in detected_model else 256)
+    detected_w = width or ckpt_config.get("width", 192 if "convnext_base" in detected_model else 128)
 
-    print(f"Packaging model: '{detected_model}' | Input Resolution: {detected_h}x{detected_w} | TTA: {use_tta} | Temp: {temperature}")
+    print(f"Packaging model: '{detected_model}' | Input Resolution: {detected_h}x{detected_w} | TTA: {use_tta} | Temp: {temperature} | Metric: {metric}")
 
     # 2. Write dynamic run.py
     run_py_content = generate_run_py(
@@ -370,7 +409,9 @@ def package_submission(
         width=detected_w,
         temperature=temperature,
         use_tta=use_tta,
+        metric=metric,
     )
+
     run_py_path = os.path.join(staging_dir, "run.py")
     with open(run_py_path, "w", encoding="utf-8") as f:
         f.write(run_py_content)
@@ -418,11 +459,12 @@ def package_submission(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Package Codabench Submission")
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to checkpoint")
-    parser.add_argument("--output", type=str, default="submissions/EXP-003_submission.zip", help="Output zip")
-    parser.add_argument("--model", type=str, default="convnext_base", choices=["resnet50", "convnext_base"])
-    parser.add_argument("--height", type=int, default=384)
-    parser.add_argument("--width", type=int, default=192)
-    parser.add_argument("--temp", type=float, default=0.80)
+    parser.add_argument("--output", type=str, default="submissions/EXP-006_submission.zip", help="Output zip")
+    parser.add_argument("--model", type=str, default="solider_swin_tiny", help="Model architecture name")
+    parser.add_argument("--height", type=int, default=256)
+    parser.add_argument("--width", type=int, default=128)
+    parser.add_argument("--temp", type=float, default=1.0)
+    parser.add_argument("--metric", type=str, default="cosine", choices=["cosine", "asymmetric", "l1"])
     parser.add_argument("--no_tta", action="store_true", default=False)
     args = parser.parse_args()
 
@@ -434,4 +476,6 @@ if __name__ == "__main__":
         width=args.width,
         temperature=args.temp,
         use_tta=not args.no_tta,
+        metric=args.metric,
     )
+

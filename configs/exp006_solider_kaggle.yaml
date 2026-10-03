@@ -1,0 +1,43 @@
+# Configuration for EXP-006: SOLIDER Human-Centric Foundation Fine-Tuning with Surveillance MEVID Augmentations
+experiment_id: EXP-006
+description: "SOLIDER Swin-Tiny Human-Centric Foundation Model with MEVID Surveillance Blur & Resolution Augmentations"
+
+model:
+  backbone: solider_swin_tiny
+  pretrained: true
+  semantic_weight: 0.8
+  dropout_rate: 0.3
+  num_attributes: 40
+
+image_height: 256
+image_width: 128
+
+epochs: 50
+batch_size: 160        # 160 per GPU -> 320 global batch size across 2 GPUs
+val_batch_size: 256
+learning_rate: 0.0001
+min_lr: 0.000001
+weight_decay: 0.0001
+
+loss:
+  asl_weight: 1.0
+  group_weight: 0.5
+  gamma_neg: 4.0
+  gamma_pos: 0.0
+  clip: 0.05
+
+augmentations:
+  surveillance_domain: true
+  erasing_prob: 0.35
+  blur_prob: 0.30
+  res_drop_prob: 0.30
+
+inference:
+  metric: cosine
+  temperature: 1.0
+  use_tta: false
+
+paths:
+  data_dir: /tmp/upar_data
+  checkpoint_dir: checkpoints/exp006
+  submission_dir: submissions

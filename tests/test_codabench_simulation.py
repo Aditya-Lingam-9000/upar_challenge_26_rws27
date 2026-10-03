@@ -7,7 +7,6 @@ Simulates exact Codabench Ingestion and Scoring pipeline:
 4. Scoring phase: evaluates mADM, mAP, Rank-1, Rank-5, Rank-10, mINP against ground truth.
 5. Edge case stress tests: empty gallery, corrupted images, out-of-order attribute queries.
 """
-import argparse
 import csv
 import importlib.util
 import os
@@ -16,27 +15,24 @@ import time
 import zipfile
 import numpy as np
 import torch
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.dataset import resolve_data_root
+WORKSPACE = "/Users/sama/D/RWS2027"
+ZIP_PATH = os.path.join(WORKSPACE, "submissions/EXP-004_submission.zip")
+SANDBOX_DIR = "/tmp/codabench_ingestion_container"
+VAL_DIR = os.path.join(WORKSPACE, "UPAR-Challenge-2027/data/annotations/task2/val")
+DATA_DIR = os.path.join(WORKSPACE, "UPAR-Challenge-2027/data")
 
 
 def compute_metrics(rankings: np.ndarray, gt_labels: np.ndarray, queries: np.ndarray) -> dict[str, float]:
-    """Official Codabench scoring calculation: mADM, mAP, Rank-1, Rank-5, Rank-10, mINP.
-    
-    Uses memory-efficient 2D matrix multiplication to prevent 18.5 GB RAM spikes.
-    """
+    """Official Codabench scoring calculation: mADM, mAP, Rank-1, Rank-5, Rank-10, mINP."""
     num_queries = queries.shape[0]
     num_gallery = gt_labels.shape[0]
     num_attributes = queries.shape[1]
 
-    # Memory-efficient 2D vectorized difference: sum |q - g| = sum(q) + sum(g) - 2 * (q @ g.T)
-    q_sum = queries.sum(axis=1, keepdims=True)
-    g_sum = gt_labels.sum(axis=1, keepdims=True).T
-    q_dot_g = queries @ gt_labels.T
-    diffs = np.clip(q_sum + g_sum - 2.0 * q_dot_g, 0.0, 40.0)
-    matches = (diffs < 0.5)
+    # Perfect match: all 40 attributes equal query
+    # gt_labels: (G, 40), queries: (Q, 40)
+    # matches: (Q, G) bool
+    matches = np.all(gt_labels[None, :, :] == queries[:, None, :], axis=2)
 
     aps = []
     inps = []
@@ -46,7 +42,10 @@ def compute_metrics(rankings: np.ndarray, gt_labels: np.ndarray, queries: np.nda
     r10_list = []
 
     # Degree of match for ADM: dom(g) = (number of attributes agreeing) / 40
-    dom = 1.0 - (diffs / 40.0)
+    # Shape: (Q, G)
+    dom = (gt_labels[None, :, :] == queries[:, None, :]).mean(axis=2)
+
+    # Normalized degree of match ndom(g) = max(0, (dom - mean_dom) / (max_dom - mean_dom))
     mean_dom = dom.mean(axis=1, keepdims=True)
     max_dom = dom.max(axis=1, keepdims=True)
     denom = np.where(max_dom - mean_dom > 1e-7, max_dom - mean_dom, 1.0)
@@ -97,57 +96,30 @@ def compute_metrics(rankings: np.ndarray, gt_labels: np.ndarray, queries: np.nda
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Codabench Simulation Test")
-    parser.add_argument("--zip_path", type=str, default=None, help="Path to submission zip")
-    parser.add_argument("--data_root", type=str, default="UPAR-Challenge-2027/data", help="Dataset root")
-    parser.add_argument("--max_gallery", type=int, default=500, help="Max gallery images to evaluate")
-    parser.add_argument("--max_queries", type=int, default=100, help="Max queries to evaluate")
-    args = parser.parse_args()
-
-    # Auto-detect zip path
-    zip_path = args.zip_path
-    if zip_path is None:
-        zip_candidates = [
-            "submissions/EXP-006_submission.zip",
-            "submissions/EXP-006_STAGE2_SWIN_METRIC_submission.zip",
-            "submissions/EXP-006_STAGE2_DUAL_FUSED_CHAMPIONSHIP_submission.zip",
-        ]
-        zip_path = next((z for z in zip_candidates if os.path.exists(z)), None)
-        if zip_path is None:
-            raise FileNotFoundError("No submission zip found in submissions/! Please provide --zip_path.")
-
-    data_dir = resolve_data_root(args.data_root)
-    val_dir = os.path.join(data_dir, "annotations", "task2", "val")
-    sandbox_dir = "/tmp/codabench_ingestion_container"
-
     print("=" * 80)
     print("CODABENCH SERVER END-TO-END INGESTION & SCORING SIMULATION")
-    print(f"Testing submission package: {zip_path}")
-    print(f"Data directory: {data_dir}")
+    print(f"Testing submission package: {ZIP_PATH}")
     print("=" * 80)
 
     # 1. Unzip to sandbox
-    if os.path.exists(sandbox_dir):
-        shutil.rmtree(sandbox_dir)
-    os.makedirs(sandbox_dir, exist_ok=True)
+    if os.path.exists(SANDBOX_DIR):
+        shutil.rmtree(SANDBOX_DIR)
+    os.makedirs(SANDBOX_DIR, exist_ok=True)
 
-    print(f"\n[Step 1] Extracting submission zip into container sandbox ({sandbox_dir})...")
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        zf.extractall(sandbox_dir)
+    print(f"\n[Step 1] Extracting submission zip into container sandbox ({SANDBOX_DIR})...")
+    with zipfile.ZipFile(ZIP_PATH, "r") as zf:
+        zf.extractall(SANDBOX_DIR)
 
-    files = os.listdir(sandbox_dir)
+    files = os.listdir(SANDBOX_DIR)
     print(f"Archive contents: {files}")
     assert "run.py" in files, "Missing run.py!"
     assert "metadata.yaml" in files, "Missing metadata.yaml!"
-    has_model_pth = os.path.exists(os.path.join(sandbox_dir, "assets", "model.pth"))
-    has_stage2_pth = os.path.exists(os.path.join(sandbox_dir, "assets", "model_backbone.pth")) and os.path.exists(os.path.join(sandbox_dir, "assets", "metric_heads.pth"))
-    has_dual_pth = os.path.exists(os.path.join(sandbox_dir, "assets", "model_convnext.pth")) and os.path.exists(os.path.join(sandbox_dir, "assets", "model_swin.pth")) and os.path.exists(os.path.join(sandbox_dir, "assets", "metric_heads.pth"))
-    assert has_model_pth or has_stage2_pth or has_dual_pth, "Missing model weights in assets/!"
+    assert os.path.exists(os.path.join(SANDBOX_DIR, "assets", "model.pth")), "Missing assets/model.pth!"
     print(">> Step 1 PASSED: Archive structure strictly compliant with Codabench.")
 
     # 2. Ingestion: Import run.py and load_model()
     print("\n[Step 2] Ingestion Program: Importing run.py and invoking load_model()...")
-    spec = importlib.util.spec_from_file_location("submission_run", os.path.join(sandbox_dir, "run.py"))
+    spec = importlib.util.spec_from_file_location("submission_run", os.path.join(SANDBOX_DIR, "run.py"))
     submission_run = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(submission_run)
 
@@ -195,30 +167,32 @@ def main():
     print("\n[Step 4] Loading Official Validation Benchmark Data...")
     gallery_items = []
     gt_labels = []
-    with open(os.path.join(val_dir, "gt.csv"), mode="r", encoding="utf-8") as f:
+    with open(os.path.join(VAL_DIR, "gt.csv"), mode="r", encoding="utf-8") as f:
         reader = csv.reader(f)
         header = next(reader)
         for i, row in enumerate(reader):
             rel_path = row[0]
             labels = [float(v) for v in row[1:]]
-            full_path = os.path.join(data_dir, rel_path)
+            full_path = os.path.join(DATA_DIR, rel_path)
             gallery_items.append({
                 "index": i,
                 "image": rel_path,
                 "image_path": full_path,
             })
             gt_labels.append(labels)
-            if args.max_gallery is not None and i >= args.max_gallery - 1:
+            # For quick local benchmark simulation, let's take subset of 500 gallery images or full?
+            # Let's run a meaningful sample of 500 gallery images and 100 queries for ultra fast verification on M1 CPU
+            if i >= 499:
                 break
 
     queries_list = []
-    with open(os.path.join(val_dir, "queries.csv"), mode="r", encoding="utf-8") as f:
+    with open(os.path.join(VAL_DIR, "queries.csv"), mode="r", encoding="utf-8") as f:
         reader = csv.reader(f)
         header = next(reader)
         attr_cols = [c.lstrip("# ").strip() for c in header]
         for i, row in enumerate(reader):
             queries_list.append([float(val) for val in row])
-            if args.max_queries is not None and i >= args.max_queries - 1:
+            if i >= 99:
                 break
 
     gt_labels_np = np.array(gt_labels, dtype=np.float32)
@@ -247,9 +221,9 @@ def main():
     print("\n[Step 6] Scoring Phase: Ranking and Metric Computation...")
     # Sorting gallery indices for each query in ascending distance order
     rankings = np.argsort(distances, axis=1)
-    np.save(os.path.join(sandbox_dir, "rankings.npy"), rankings)
-    assert os.path.exists(os.path.join(sandbox_dir, "rankings.npy")), "rankings.npy creation failed!"
-    print(f"Successfully generated rankings.npy ({os.path.getsize(os.path.join(sandbox_dir, 'rankings.npy'))} bytes)")
+    np.save(os.path.join(SANDBOX_DIR, "rankings.npy"), rankings)
+    assert os.path.exists(os.path.join(SANDBOX_DIR, "rankings.npy")), "rankings.npy creation failed!"
+    print(f"Successfully generated rankings.npy ({os.path.getsize(os.path.join(SANDBOX_DIR, 'rankings.npy'))} bytes)")
 
     metrics = compute_metrics(rankings, gt_labels_np, queries_np)
     print("\n" + "=" * 80)
@@ -264,7 +238,7 @@ def main():
     print("=" * 80)
 
     # Cleanup
-    shutil.rmtree(sandbox_dir)
+    shutil.rmtree(SANDBOX_DIR)
     print("\n>> VERIFICATION COMPLETE: ALL CODABENCH CRITERIA 100% VERIFIED AND PASSING!")
 
 

@@ -159,10 +159,77 @@ def get_default_transforms(
         ])
 
 
+class RandomResolutionDrop:
+    """Simulates unconstrained low-resolution MEVID surveillance video feeds."""
+
+    def __init__(self, p: float = 0.3, min_scale: float = 0.4, max_scale: float = 0.8) -> None:
+        self.p = p
+        self.min_scale = min_scale
+        self.max_scale = max_scale
+
+    def __call__(self, img: Image.Image) -> Image.Image:
+        if np.random.rand() > self.p:
+            return img
+        w, h = img.size
+        scale = np.random.uniform(self.min_scale, self.max_scale)
+        down_w, down_h = max(int(w * scale), 16), max(int(h * scale), 32)
+        down = img.resize((down_w, down_h), Image.Resampling.BILINEAR)
+        return down.resize((w, h), Image.Resampling.BILINEAR)
+
+
+def get_surveillance_mevid_transforms(
+    height: int = 256,
+    width: int = 128,
+    is_train: bool = True,
+    erasing_prob: float = 0.35,
+    blur_prob: float = 0.30,
+    res_drop_prob: float = 0.30,
+) -> T.Compose:
+    """Surveillance Domain-Adapted Transforms simulating unconstrained MEVID test cameras.
+
+    Features:
+    - RandomResolutionDrop: downscales to 75px-equivalent blur and recovers.
+    - GaussianBlur: simulates camera motion blur and focus shifts.
+    - RandomErasing: simulates pedestrian occlusion in crowded scenes.
+    """
+    normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+
+    if is_train:
+        transform_list = [
+            T.Resize((height, width), interpolation=T.InterpolationMode.BILINEAR),
+            T.RandomHorizontalFlip(p=0.5),
+        ]
+        if res_drop_prob > 0.0:
+            transform_list.append(RandomResolutionDrop(p=res_drop_prob))
+        if blur_prob > 0.0:
+            transform_list.append(T.RandomApply([T.GaussianBlur(kernel_size=(3, 5), sigma=(0.1, 1.5))], p=blur_prob))
+        transform_list.extend([
+            T.ToTensor(),
+            normalize,
+        ])
+        if erasing_prob > 0.0:
+            transform_list.append(
+                T.RandomErasing(
+                    p=erasing_prob,
+                    scale=(0.02, 0.25),
+                    ratio=(0.3, 3.3),
+                    value="random",
+                )
+            )
+        return T.Compose(transform_list)
+    else:
+        return T.Compose([
+            T.Resize((height, width), interpolation=T.InterpolationMode.BILINEAR),
+            T.ToTensor(),
+            normalize,
+        ])
+
+
 class UPARDataset(Dataset):
     """PyTorch Dataset for UPAR multi-label pedestrian attribute recognition with RAM byte caching."""
 
     def __init__(
+
         self,
         csv_path: str,
         data_root: str,

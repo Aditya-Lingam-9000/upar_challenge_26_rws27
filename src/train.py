@@ -39,6 +39,8 @@ from torch.utils.data import DataLoader
 from src.dataset import (
     DomainBalancedBatchSampler,
     UPARDataset,
+    get_default_transforms,
+    get_surveillance_mevid_transforms,
     resolve_data_root,
     stage_dataset_to_fast_local_storage,
 )
@@ -276,6 +278,9 @@ def train_abpr(
     resume_checkpoint: Optional[str] = None,
     log_interval: int = 50,
     preload_ram: bool = True,
+    surveillance_aug: bool = False,
+    pretrained_path: Optional[str] = None,
+    semantic_weight: float = 0.8,
 ) -> dict[str, float]:
     """Execute complete training pipeline and return best evaluation metrics."""
     os.makedirs(save_dir, exist_ok=True)
@@ -300,6 +305,10 @@ def train_abpr(
         else:
             print(f"[{exp_id}] Single-GPU Engine Activated: direct local execution (zero DataParallel GIL overhead)")
         print(f"[{exp_id}] Effective Global Batch Size: {batch_size * world_size} | Epochs: {epochs}")
+        if surveillance_aug:
+            print(f"[{exp_id}] Surveillance Domain Augmentations: ENABLED (MEVID 75px ResolutionDrop + Motion Blur + Erasing)")
+        if pretrained_path:
+            print(f"[{exp_id}] Foundation Pretrained Weights: {pretrained_path}")
         print(f"[{exp_id}] ==========================================================================", flush=True)
 
     if num_workers is None:
@@ -322,9 +331,15 @@ def train_abpr(
             print(f"[{exp_id}] Contents of {data_root}: {os.listdir(data_root)}", flush=True)
         raise FileNotFoundError(f"Training annotations not found at: {train_csv}")
 
+    if surveillance_aug:
+        train_tf = get_surveillance_mevid_transforms(height=height, width=width, is_train=True)
+    else:
+        train_tf = get_default_transforms(height=height, width=width, is_train=True)
+
     train_dataset = UPARDataset(
         csv_path=train_csv,
         data_root=data_root,
+        transform=train_tf,
         height=height,
         width=width,
         is_train=True,
@@ -351,7 +366,13 @@ def train_abpr(
         print(f"[{exp_id}] Batches per Epoch per Rank: {len(batch_sampler)} | DataLoader Workers: {num_workers} (Prefetch: 2)", flush=True)
 
     # 2. Model Initialization
-    raw_model = build_model(model_name, pretrained=True, num_attributes=40)
+    raw_model = build_model(
+        model_name,
+        pretrained=True,
+        num_attributes=40,
+        pretrained_path=pretrained_path,
+        semantic_weight=semantic_weight,
+    )
     raw_model.to(device)
 
     # Wrap with DistributedDataParallel if multi-process DDP, otherwise use raw_model directly (NEVER DataParallel)
@@ -612,6 +633,9 @@ if __name__ == "__main__":
     parser.add_argument("--resume", type=str, default=None)
     parser.add_argument("--log_interval", type=int, default=50)
     parser.add_argument("--no_preload_ram", action="store_true", default=False, help="Disable preloading dataset into RAM")
+    parser.add_argument("--surveillance_aug", action="store_true", default=False, help="Activate MEVID surveillance domain augmentations")
+    parser.add_argument("--pretrained_path", type=str, default=None, help="Path to foundation pretrained weights")
+    parser.add_argument("--semantic_weight", type=float, default=0.8, help="Semantic controller weight for SOLIDER")
     args = parser.parse_args()
 
     preload_ram = not args.no_preload_ram
@@ -621,6 +645,8 @@ if __name__ == "__main__":
         cfg = load_yaml_config(args.config)
         print(f"Loaded configuration from YAML: {args.config}")
         model_name = cfg.get("model", {}).get("backbone", args.model)
+        pretrained_path = cfg.get("model", {}).get("pretrained_path", args.pretrained_path)
+        semantic_weight = float(cfg.get("model", {}).get("semantic_weight", args.semantic_weight))
         data_root = cfg.get("paths", {}).get("data_dir", args.data_root)
         epochs = cfg.get("epochs", args.epochs)
         batch_size = cfg.get("batch_size", args.batch_size)
@@ -633,8 +659,11 @@ if __name__ == "__main__":
         exp_id = cfg.get("experiment_id", args.exp_id)
         save_dir = cfg.get("paths", {}).get("checkpoint_dir", args.save_dir)
         num_workers = cfg.get("num_workers", args.num_workers)
+        surveillance_aug = cfg.get("augmentations", {}).get("surveillance_domain", args.surveillance_aug)
     else:
         model_name = args.model
+        pretrained_path = args.pretrained_path
+        semantic_weight = args.semantic_weight
         data_root = args.data_root
         epochs = args.epochs
         batch_size = args.batch_size
@@ -647,6 +676,7 @@ if __name__ == "__main__":
         exp_id = args.exp_id
         save_dir = args.save_dir
         num_workers = args.num_workers
+        surveillance_aug = args.surveillance_aug
 
     train_abpr(
         model_name=model_name,
@@ -673,4 +703,8 @@ if __name__ == "__main__":
         resume_checkpoint=args.resume,
         log_interval=args.log_interval,
         preload_ram=preload_ram,
+        surveillance_aug=surveillance_aug,
+        pretrained_path=pretrained_path,
+        semantic_weight=semantic_weight,
     )
+
