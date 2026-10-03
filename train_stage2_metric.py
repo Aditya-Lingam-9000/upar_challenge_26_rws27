@@ -78,7 +78,7 @@ def main():
     parser.add_argument("--convnext_zip", type=str, default="submissions/EXP-004_submission.zip")
     parser.add_argument("--swin_zip", type=str, default="submissions/EXP-005A_submission.zip")
     parser.add_argument("--data_root", type=str, default="UPAR-Challenge-2027/data")
-    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--epochs", type=int, default=25)
     parser.add_argument("--batch_size", type=int, default=512)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
@@ -306,6 +306,10 @@ def main():
                         },
                         args.save_path,
                     )
+                del hybrid_dist
+            del val_v_emb, val_q_emb
+            import gc
+            gc.collect()
 
     print(f"\nStage 2 Training Completed. Peak mADM: {best_madm:.4f}. Saved checkpoint to {args.save_path}")
 

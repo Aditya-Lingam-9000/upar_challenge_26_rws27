@@ -213,12 +213,17 @@ def evaluate_distance_matrix(
     directly from a distance matrix of shape (Q, G).
     """
     Q = queries.shape[0]
-    diffs = np.abs(queries[:, None, :] - gallery_gt[None, :, :]).sum(axis=-1)
-    is_correct = (diffs == 0)
+    G = gallery_gt.shape[0]
+
+    # Memory-efficient agreement computation via 2D matrix multiplication:
+    # agreed[q, g] = sum_a (queries[q, a] == gallery_gt[g, a])
+    # For binary {0, 1}: q*g + (1-q)*(1-g)
+    agreed = queries @ gallery_gt.T + (1.0 - queries) @ (1.0 - gallery_gt).T  # (Q, G) float32: only ~462 MB
+    is_correct = (agreed >= 39.5)  # All 40 attributes match exactly
     ranks = np.argsort(distances, axis=1)
 
     adms, aps, r1_list, r5_list, r10_list, inps = [], [], [], [], [], []
-    dom = 1.0 - (diffs / 40.0)
+    dom = agreed / 40.0
     mu_dom = np.mean(dom, axis=1, keepdims=True)
     denom = np.maximum(1.0 - mu_dom, 1e-6)
     ndom = np.maximum(0.0, (dom - mu_dom) / denom)
