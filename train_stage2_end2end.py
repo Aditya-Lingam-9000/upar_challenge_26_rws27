@@ -26,7 +26,7 @@ from torch.utils.data import DataLoader, Dataset
 import torchvision.models as models
 import torchvision.transforms as T
 
-from src.dataset import Task2RetrievalEvalData, resolve_data_root
+from src.dataset import Task2RetrievalEvalData, resolve_data_root, stage_dataset_to_fast_local_storage
 from src.evaluate import get_device
 from src.losses import AsymmetricLoss, CategorySoftmaxLoss
 from src.metric_learning import (
@@ -66,7 +66,6 @@ class UPAREndToEndDataset(Dataset):
         data_root: str,
         transform: T.Compose | None = None,
         debug_samples: int | None = None,
-        preload_to_ram: bool = True,
     ) -> None:
         self.data_root = data_root
         self.transform = transform or T.Compose([
@@ -75,7 +74,6 @@ class UPAREndToEndDataset(Dataset):
             T.ToTensor(),
             T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
-        self.preload_to_ram = preload_to_ram
 
         # 1. Load canonical queries: (7204, 40)
         queries_path = os.path.join(data_root, "annotations", "task2", "train", "queries.csv")
@@ -125,41 +123,17 @@ class UPAREndToEndDataset(Dataset):
         self.labels = np.array(self.labels, dtype=np.float32)
         self.identity_ids = np.array(self.identity_ids, dtype=np.int64)
 
-        # Preload image bytes if requested
-        self.image_bytes: list[bytes] | None = None
-        if self.preload_to_ram and len(self.image_paths) > 0:
-            from concurrent.futures import ThreadPoolExecutor
-            t0 = time.time()
-            print(f"[RAM Cache] Preloading {len(self.image_paths)} images into RAM...", flush=True)
-
-            def read_file(p: str) -> bytes:
-                fp = os.path.join(self.data_root, p)
-                try:
-                    with open(fp, "rb") as bf:
-                        return bf.read()
-                except Exception:
-                    return b""
-
-            with ThreadPoolExecutor(max_workers=16) as pool:
-                self.image_bytes = list(pool.map(read_file, self.image_paths))
-            mb = sum(len(b) for b in self.image_bytes) / (1024 * 1024)
-            print(f"[RAM Cache] Preloaded {len(self.image_paths)} images ({mb:.1f} MB) in {time.time()-t0:.1f}s.", flush=True)
-
     def __len__(self) -> int:
         return len(self.image_paths)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, int, torch.Tensor]:
-        if self.image_bytes is not None and idx < len(self.image_bytes) and len(self.image_bytes[idx]) > 0:
-            import io
-            img = Image.open(io.BytesIO(self.image_bytes[idx])).convert("RGB")
-        else:
-            full_p = os.path.join(self.data_root, self.image_paths[idx])
-            try:
-                img = Image.open(full_p).convert("RGB")
-            except Exception:
-                img = Image.new("RGB", (128, 256), color=(128, 128, 128))
+        full_p = os.path.join(self.data_root, self.image_paths[idx])
+        try:
+            with Image.open(full_p) as img:
+                img_tensor = self.transform(img.convert("RGB"))
+        except Exception:
+            img_tensor = torch.zeros(3, 256, 128, dtype=torch.float32)
 
-        img_tensor = self.transform(img)
         label = torch.from_numpy(self.labels[idx])
         ident = int(self.identity_ids[idx])
         query_vec = torch.from_numpy(self.canonical_queries[ident])
@@ -408,6 +382,7 @@ def main() -> None:
     parser.add_argument("--lambda_metric", type=float, default=0.25, help="Retrieval score fusion lambda")
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--eval_interval", type=int, default=5, help="Evaluate every N epochs")
+    parser.add_argument("--log_interval", type=int, default=50, help="Print progress every N steps")
     parser.add_argument("--debug_samples", type=int, default=None, help="Debug: limit training samples")
     parser.add_argument("--val_subset", type=int, default=None, help="Debug: limit validation samples")
     parser.add_argument("--no_preload", action="store_true", help="Disable RAM caching of image bytes")
@@ -422,9 +397,10 @@ def main() -> None:
     print(f"Device: {device} | Total Epochs: {args.epochs} | Batch Size: {args.batch_size}")
     print("=" * 80)
 
-    # 1. Resolve dataset
+    # 1. Resolve dataset and stage to ultra-fast NVMe if running on Kaggle FUSE storage
     resolved_root = resolve_data_root(args.data_root)
-    print(f"Data Root resolved to: {resolved_root}")
+    resolved_root = stage_dataset_to_fast_local_storage(resolved_root)
+    print(f"Data Root active at: {resolved_root}")
 
     # 2. Platt calibration parameters
     calib_candidates = [
@@ -448,7 +424,6 @@ def main() -> None:
     train_dataset = UPAREndToEndDataset(
         data_root=resolved_root,
         debug_samples=args.debug_samples,
-        preload_to_ram=not args.no_preload,
     )
     print(f"Loaded {len(train_dataset)} training samples.")
 
@@ -460,6 +435,8 @@ def main() -> None:
         num_workers=nw,
         pin_memory=(device.type == "cuda"),
         drop_last=(len(train_dataset) > args.batch_size),
+        persistent_workers=(nw > 0),
+        prefetch_factor=2 if nw > 0 else None,
     )
 
     # 4. Load validation data
@@ -558,6 +535,16 @@ def main() -> None:
             total_asl += loss_asl.item() * bs
             total_arc += loss_arc.item() * bs
             total_cm += loss_cm.item() * bs
+
+            if (batch_idx + 1) % args.log_interval == 0 or (batch_idx + 1) == len(train_loader):
+                elapsed_batch = time.time() - t0
+                speed = (batch_idx + 1) * bs / max(elapsed_batch, 0.1)
+                print(
+                    f"  Epoch [{epoch:02d}/{args.epochs:02d}] Step [{batch_idx+1:04d}/{len(train_loader):04d}] | "
+                    f"Loss: {loss.item():.4f} (ASL: {loss_asl.item():.4f}, Arc: {loss_arc.item():.4f}, CM: {loss_cm.item():.4f}) | "
+                    f"Speed: {speed:.1f} img/s",
+                    flush=True,
+                )
 
         scheduler.step()
         n_samples = len(train_dataset)
