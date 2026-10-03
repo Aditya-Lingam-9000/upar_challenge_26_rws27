@@ -1,0 +1,258 @@
+"""Stage 2 Training Script: Cross-Modal Metric Learning with ArcFace.
+
+Trains VisualProjector and QueryEncoder to align image features with query semantics
+using ArcFace Additive Angular Margin loss and Symmetric InfoNCE Contrastive loss.
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import os
+import sys
+import time
+import numpy as np
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from src.dataset import Task2RetrievalEvalData, UPARDataset, resolve_data_root
+from src.evaluate import get_device
+from src.feature_extractor import extract_dataset_features_and_logits, load_model_for_extraction
+from src.metric_learning import (
+    ArcFaceLoss,
+    CrossModalContrastiveLoss,
+    QueryEncoder,
+    VisualProjector,
+    compute_hybrid_distances,
+    evaluate_distance_matrix,
+)
+
+
+def load_task2_train_annotations(data_root: str) -> tuple[np.ndarray, np.ndarray]:
+    """Loads training identity IDs and canonical query vectors for all 97,669 training images."""
+    task2_train_dir = os.path.join(data_root, "annotations", "task2", "train")
+    queries_path = os.path.join(task2_train_dir, "queries.csv")
+    ids_path = os.path.join(task2_train_dir, "ids.csv")
+
+    # 1. Load canonical query vectors (7204, 40)
+    canonical_queries = []
+    with open(queries_path, "r", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        _ = next(reader)
+        for r in reader:
+            if r:
+                canonical_queries.append([float(x.strip()) for x in r])
+    canonical_queries = np.array(canonical_queries, dtype=np.float32)
+
+    # 2. Load per-image query ID index (maps each image in train.csv to 0..7203)
+    train_csv_path = os.path.join(data_root, "annotations", "train.csv")
+    img_to_query_id = {}
+    with open(ids_path, "r", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        for r in reader:
+            if len(r) >= 2:
+                img_to_query_id[r[0].strip()] = int(r[1].strip())
+
+    train_ids = []
+    with open(train_csv_path, "r", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        _ = next(reader)
+        for r in reader:
+            if r:
+                p = r[0].strip()
+                train_ids.append(img_to_query_id.get(p, 0))
+
+    train_ids = np.array(train_ids, dtype=np.int64)
+    # Per-sample query vectors: (97669, 40)
+    sample_queries = canonical_queries[train_ids]
+
+    return train_ids, sample_queries
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Stage 2 Metric Learning Training")
+    parser.add_argument("--model", type=str, default="convnext_tiny", choices=["convnext_tiny", "swin_t"])
+    parser.add_argument("--submission_zip", type=str, default="submissions/EXP-004_submission.zip")
+    parser.add_argument("--data_root", type=str, default="UPAR-Challenge-2027/data")
+    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--batch_size", type=int, default=512)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--weight_decay", type=float, default=1e-4)
+    parser.add_argument("--scale", type=float, default=30.0)
+    parser.add_argument("--margin", type=float, default=0.20)
+    parser.add_argument("--lambda_contrastive", type=float, default=0.5)
+    parser.add_argument("--save_path", type=str, default="checkpoints/stage2_metric_heads.pth")
+    args = parser.parse_args()
+
+    print("=" * 80)
+    print("STAGE 2: CROSS-MODAL METRIC LEARNING & ARCFACE ALIGNMENT TRAINING")
+    print("=" * 80)
+
+    device = get_device()
+    print(f"Compute Device: {device}")
+    data_root = resolve_data_root(args.data_root)
+
+    os.makedirs("checkpoints", exist_ok=True)
+    train_feat_cache = f"checkpoints/train_feats_{args.model}.npy"
+    val_feat_cache = f"checkpoints/val_feats_{args.model}.npy"
+    val_logit_cache = f"checkpoints/val_logits_{args.model}.npy"
+
+    # 1. Feature Extraction / Loading
+    train_csv = os.path.join(data_root, "annotations", "train.csv")
+    val_csv = os.path.join(data_root, "annotations", "val.csv")
+
+    if not os.path.exists(train_feat_cache):
+        print(f"\n[1/4] Extracting training features using {args.model}...")
+        model = load_model_for_extraction(args.submission_zip, args.model, device)
+        train_ds = UPARDataset(csv_path=train_csv, data_root=data_root, height=256, width=128, is_train=False)
+        train_loader = DataLoader(train_ds, batch_size=128, shuffle=False, num_workers=0)
+        train_feats, _ = extract_dataset_features_and_logits(model, train_loader, device)
+        np.save(train_feat_cache, train_feats)
+        print(f"Saved {train_feats.shape} training features to {train_feat_cache}")
+        del train_ds, train_loader
+    else:
+        print(f"\n[1/4] Loading cached training features from {train_feat_cache}...")
+        train_feats = np.load(train_feat_cache)
+
+    if not os.path.exists(val_feat_cache) or not os.path.exists(val_logit_cache):
+        print(f"\n[2/4] Extracting validation features and logits using {args.model}...")
+        model = load_model_for_extraction(args.submission_zip, args.model, device)
+        val_ds = UPARDataset(csv_path=val_csv, data_root=data_root, height=256, width=128, is_train=False)
+        val_loader = DataLoader(val_ds, batch_size=128, shuffle=False, num_workers=0)
+        val_feats, val_logits = extract_dataset_features_and_logits(model, val_loader, device)
+        np.save(val_feat_cache, val_feats)
+        np.save(val_logit_cache, val_logits)
+        print(f"Saved {val_feats.shape} val features and {val_logits.shape} val logits.")
+        del val_ds, val_loader
+    else:
+        print(f"\n[2/4] Loading cached validation features from {val_feat_cache}...")
+        val_feats = np.load(val_feat_cache)
+        val_logits = np.load(val_logit_cache)
+
+    # Load annotations
+    print("\n[3/4] Loading Task 2 Identity and Query annotations...")
+    train_ids, train_queries = load_task2_train_annotations(data_root)
+    num_classes = len(np.unique(train_ids))
+    print(f"Loaded {len(train_ids)} training samples across {num_classes} unique identity classes.")
+
+    retrieval_data = Task2RetrievalEvalData(data_root=data_root)
+    calib = np.load("checkpoints/stage1_calibration_params.npz")
+    T_param = calib["T_004"] if "convnext" in args.model else calib["T_005"]
+    b_param = calib["b_004"] if "convnext" in args.model else calib["b_005"]
+    calib_val_probs = 1.0 / (1.0 + np.exp(-np.clip((val_logits - b_param[None, :]) / T_param[None, :], -20.0, 20.0)))
+
+    # 2. Build Models and Optimizers
+    print("\n[4/4] Initializing Stage 2 Metric Learning Networks...")
+    vis_projector = VisualProjector(in_features=768, embedding_dim=512, dropout=0.1).to(device)
+    query_encoder = QueryEncoder(num_attributes=40, embedding_dim=512, dropout=0.1).to(device)
+    arcface_loss_fn = ArcFaceLoss(
+        num_classes=num_classes,
+        embedding_dim=512,
+        scale=args.scale,
+        margin=args.margin,
+    ).to(device)
+    contrastive_loss_fn = CrossModalContrastiveLoss(temperature=0.07).to(device)
+
+    train_tensor_feats = torch.from_numpy(train_feats).float()
+    train_tensor_queries = torch.from_numpy(train_queries).float()
+    train_tensor_ids = torch.from_numpy(train_ids).long()
+
+    train_dataset = TensorDataset(train_tensor_feats, train_tensor_queries, train_tensor_ids)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
+
+    optimizer = torch.optim.AdamW(
+        list(vis_projector.parameters()) + list(query_encoder.parameters()) + list(arcface_loss_fn.parameters()),
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-5)
+
+    print(f"Beginning training for {args.epochs} epochs (Batch size: {args.batch_size}, Batches/epoch: {len(train_loader)})...")
+    best_madm = 0.0
+
+    for epoch in range(1, args.epochs + 1):
+        vis_projector.train()
+        query_encoder.train()
+        arcface_loss_fn.train()
+
+        total_loss = 0.0
+        total_arc = 0.0
+        total_cm = 0.0
+        t0 = time.time()
+
+        for feats, queries, labels in train_loader:
+            feats = feats.to(device, non_blocking=True)
+            queries = queries.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True)
+
+            optimizer.zero_grad()
+
+            v_emb = vis_projector(feats)
+            q_emb = query_encoder(queries)
+
+            loss_arc = arcface_loss_fn(v_emb, labels)
+            loss_cm = contrastive_loss_fn(q_emb, v_emb)
+
+            loss = loss_arc + args.lambda_contrastive * loss_cm
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item() * feats.size(0)
+            total_arc += loss_arc.item() * feats.size(0)
+            total_cm += loss_cm.item() * feats.size(0)
+
+        scheduler.step()
+        elapsed = time.time() - t0
+        n_samples = len(train_dataset)
+        avg_loss = total_loss / n_samples
+        avg_arc = total_arc / n_samples
+        avg_cm = total_cm / n_samples
+
+        print(
+            f"Epoch [{epoch:02d}/{args.epochs:02d}] | Loss: {avg_loss:.4f} (Arc: {avg_arc:.4f}, CM: {avg_cm:.4f}) | "
+            f"LR: {scheduler.get_last_lr()[0]:.2e} | Time: {elapsed:.1f}s",
+            flush=True,
+        )
+
+        # Evaluate at intervals or final
+        if epoch % 5 == 0 or epoch == args.epochs:
+            vis_projector.eval()
+            query_encoder.eval()
+
+            with torch.no_grad():
+                val_v_emb = vis_projector(torch.from_numpy(val_feats).float().to(device)).cpu().numpy()
+                val_q_emb = query_encoder(torch.from_numpy(retrieval_data.queries).float().to(device)).cpu().numpy()
+
+            for lam in [0.0, 0.15, 0.25, 0.35]:
+                hybrid_dist = compute_hybrid_distances(
+                    retrieval_data.queries,
+                    calib_val_probs,
+                    val_q_emb,
+                    val_v_emb,
+                    lambda_metric=lam,
+                )
+                metrics = evaluate_distance_matrix(hybrid_dist, retrieval_data.gallery_gt, retrieval_data.queries)
+                print(
+                    f"   [Eval λ={lam:.2f}] -> mADM: {metrics['mADM']:.4f} | mAP: {metrics['mAP']:.4f} | "
+                    f"R-1: {metrics['Rank-1']*100:5.2f}% | R-5: {metrics['Rank-5']*100:5.2f}% | mINP: {metrics['mINP']:.4f}"
+                )
+                if metrics["mADM"] > best_madm:
+                    best_madm = metrics["mADM"]
+                    torch.save(
+                        {
+                            "vis_projector": vis_projector.state_dict(),
+                            "query_encoder": query_encoder.state_dict(),
+                            "epoch": epoch,
+                            "lambda_metric": lam,
+                            "metrics": metrics,
+                        },
+                        args.save_path,
+                    )
+
+    print(f"\nStage 2 Training Completed. Peak mADM: {best_madm:.4f}. Saved checkpoint to {args.save_path}")
+
+
+if __name__ == "__main__":
+    main()
