@@ -1013,3 +1013,23 @@
   - Updated [`STEP_TRACKER.md`](file:///Users/sama/D/RWS2027/STEP_TRACKER.md).
 - **Why It Changed / Rationale:**
   - Fulfills user's exact specification: standardized config at the top, GitHub cloning with token support, hardware/dataset auto-detection, main pipeline execution, automated packaging, sandbox verification, and direct download links while keeping the 1536-D dual-model pipeline intact.
+
+---
+
+### Step 43: Resolution of Kaggle Calibration File Missing Error
+- **Date / Timestamp:** 2026-10-03 13:36
+- **What Was Done:**
+  - Diagnosed `FileNotFoundError: [Errno 2] No such file or directory: 'checkpoints/stage1_calibration_params.npz'` on Kaggle.
+  - **Root Cause:** In `.gitignore`, the pattern `checkpoints/` was ignoring all files in that directory, preventing `stage1_calibration_params.npz` (2.0 KB) from being committed and cloned to Kaggle.
+  - **Action Taken:**
+    1. Copied and force-committed the calibration parameters into tracked directory: [`assets/stage1_calibration_params.npz`](file:///Users/sama/D/RWS2027/assets/stage1_calibration_params.npz).
+    2. Updated [`train_stage2_metric.py`](file:///Users/sama/D/RWS2027/train_stage2_metric.py) to check `assets/` first, fallback to `checkpoints/`, and include hardcoded fallback vectors for $(T_{\text{cvx}}, b_{\text{cvx}})$ and $(T_{\text{swin}}, b_{\text{swin}})$.
+    3. Updated [`src/stage2_submission_builder.py`](file:///Users/sama/D/RWS2027/src/stage2_submission_builder.py) in both `build_stage2_submission` and `build_stage2_dual_fused_submission` to apply the same robust multi-path search with hardcoded fallbacks.
+    4. Committed and pushed to `main` (commit `23af3c3`).
+- **What Changed / Created:**
+  - Tracked [`assets/stage1_calibration_params.npz`](file:///Users/sama/D/RWS2027/assets/stage1_calibration_params.npz).
+  - Updated [`train_stage2_metric.py`](file:///Users/sama/D/RWS2027/train_stage2_metric.py).
+  - Updated [`src/stage2_submission_builder.py`](file:///Users/sama/D/RWS2027/src/stage2_submission_builder.py).
+  - Updated [`STEP_TRACKER.md`](file:///Users/sama/D/RWS2027/STEP_TRACKER.md).
+- **Why It Changed / Rationale:**
+  - Guarantees `train_stage2_metric.py` and `run_stage2_full_pipeline.py` run on Kaggle without file dependency errors.
