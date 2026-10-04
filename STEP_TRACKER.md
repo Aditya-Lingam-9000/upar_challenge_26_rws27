@@ -1029,12 +1029,27 @@
 
 ---
 
+### Step 43: Resolution of VisualStream aux_head Attribute Error in train.py
+- **Date / Timestamp:** 2026-10-04 23:53
+- **What Was Done:**
+  - Resolved `AttributeError: 'VisualStream' object has no attribute 'aux_head'` during DDP parameter group initialization in [`championship_pipeline/train.py`](file:///Users/sama/D/RWS2027/championship_pipeline/train.py).
+  - Aligned optimizer parameter group `raw_model.visual_stream.aux_head.parameters()` with the actual attribute defined in [`championship_pipeline/models.py`](file:///Users/sama/D/RWS2027/championship_pipeline/models.py): `raw_model.visual_stream.aux_classifier.parameters()`.
+  - Verified AdamW parameter group construction across all 4 components (Swin-T backbone, visual adapter, aux classifier, query stream) with zero errors.
+  - Verified local verification suite [`tests_championship/test_pipeline_local.py`](file:///Users/sama/D/RWS2027/tests_championship/test_pipeline_local.py) passes 100%.
+- **What Changed / Created:**
+  - Updated [`championship_pipeline/train.py`](file:///Users/sama/D/RWS2027/championship_pipeline/train.py).
+  - Updated [`STEP_TRACKER.md`](file:///Users/sama/D/RWS2027/STEP_TRACKER.md).
+- **Why It Changed / Rationale:**
+  - Enables smooth, uninterrupted execution of the unified multi-task DDP training run on Kaggle Dual Tesla T4 GPUs.
+
+---
+
 ## Next Steps Roadmap
 1. **Pull Latest Code on Kaggle:**
    - Run `!cd /kaggle/working/upar_challenge_26_rws27 && git fetch origin && git reset --hard origin/main`
 2. **Launch Unified EXP-007 Training Run:**
    - Execute Cell 4 (55 epochs, batch size 192, Dual-GPU NCCL).
-   - Watch ArcFace, SDM, and ASL losses decrease in tandem and validation scores immediately climb from Epoch 1.
+   - Observe simultaneous convergence of ArcFace, SDM, and ASL losses with validation mADM increasing after each epoch.
 3. **Verify Codabench Submission Package:**
    - Run Cell 5 to simulate official ingestion on `submissions/EXP-007_submission.zip`.
 4. **Submit to Codabench Track 2:**

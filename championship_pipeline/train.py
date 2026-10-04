@@ -237,7 +237,7 @@ def main() -> None:
     param_groups = [
         {"params": raw_model.visual_stream.backbone.parameters(), "lr": backbone_lr},
         {"params": raw_model.visual_stream.visual_adapter.parameters(), "lr": args.lr},
-        {"params": raw_model.visual_stream.aux_head.parameters(), "lr": args.lr},
+        {"params": raw_model.visual_stream.aux_classifier.parameters(), "lr": args.lr},
         {"params": raw_model.query_stream.parameters(), "lr": args.lr},
     ]
     optimizer = torch.optim.AdamW(param_groups, weight_decay=args.weight_decay)
