@@ -930,15 +930,44 @@
 - **Why It Changed / Rationale:**
   - Provides the complete, uncompromised, battle-tested system that bridges the cross-modal gap and enables surpassing the 0.6280 mADM leaderboard ceiling.
 
+### Step 39: Kaggle Dual-GPU DDP Ingestion Fix — sys.path & Package Bootstrapping
+- **Date / Timestamp:** 2026-10-04 22:45
+- **What Was Done:**
+  - Diagnosed Kaggle runtime error: `ModuleNotFoundError: No module named 'championship_pipeline'` when launching multi-GPU DDP via `torchrun`.
+  - Identified root cause: When `torchrun` runs `championship_pipeline/train.py`, Python sets `sys.path[0]` to `.../championship_pipeline/` instead of repo root `.../upar_challenge_26_rws27/`, and no formal package initialization existed.
+  - Implemented multi-layered defense:
+    1. Created [`championship_pipeline/__init__.py`](file:///Users/sama/D/RWS2027/championship_pipeline/__init__.py) converting the pipeline into a formal Python package.
+    2. Injected automatic `sys.path` bootstrapping at the very top of [`championship_pipeline/train.py`](file:///Users/sama/D/RWS2027/championship_pipeline/train.py), [`championship_pipeline/evaluate.py`](file:///Users/sama/D/RWS2027/championship_pipeline/evaluate.py), [`championship_pipeline/dataset.py`](file:///Users/sama/D/RWS2027/championship_pipeline/dataset.py), and [`championship_pipeline/models.py`](file:///Users/sama/D/RWS2027/championship_pipeline/models.py).
+    3. Updated [`notebooks/kaggle_exp007_championship_dual_gpu.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp007_championship_dual_gpu.ipynb):
+       - Cell 3: Added `git fetch origin && git reset --hard origin/main` to guarantee clean synchronization without merge conflicts.
+       - Cell 4: Configured explicit `PYTHONPATH=/kaggle/working/upar_challenge_26_rws27:.` and passed `--data_root "$DATA_DIR"`.
+  - Verified locally:
+    - Tested direct script execution: `venv/bin/python championship_pipeline/train.py --help` (exited 0).
+    - Tested execution from within subdir: `cd championship_pipeline && python train.py --help` (exited 0).
+    - Re-ran complete verification suite: [`tests_championship/test_pipeline_local.py`](file:///Users/sama/D/RWS2027/tests_championship/test_pipeline_local.py) (all 6 tests passed 100%).
+  - Pushed all changes directly to `origin main` on GitHub.
+- **What Changed / Created:**
+  - Created [`championship_pipeline/__init__.py`](file:///Users/sama/D/RWS2027/championship_pipeline/__init__.py).
+  - Updated [`championship_pipeline/train.py`](file:///Users/sama/D/RWS2027/championship_pipeline/train.py).
+  - Updated [`championship_pipeline/evaluate.py`](file:///Users/sama/D/RWS2027/championship_pipeline/evaluate.py).
+  - Updated [`championship_pipeline/dataset.py`](file:///Users/sama/D/RWS2027/championship_pipeline/dataset.py).
+  - Updated [`championship_pipeline/models.py`](file:///Users/sama/D/RWS2027/championship_pipeline/models.py).
+  - Updated [`notebooks/kaggle_exp007_championship_dual_gpu.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp007_championship_dual_gpu.ipynb).
+- **Why It Changed / Rationale:**
+  - Guarantees seamless multi-GPU DDP launch on Kaggle Dual Tesla T4s with zero import failures regardless of invocation directory or subshell environment.
+
 ---
 
 ## Next Steps Roadmap
-1. **Push Changes to GitHub Repository:**
-   - Commit and push `championship_pipeline/`, `tests_championship/`, and `notebooks/kaggle_exp007_championship_dual_gpu.ipynb` to `main`.
-2. **Execute EXP-007 on Kaggle Dual Tesla T4 GPUs:**
-   - Run [`notebooks/kaggle_exp007_championship_dual_gpu.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp007_championship_dual_gpu.ipynb) via Kaggle "Save & Run All (Commit)".
-3. **Download & Submit to Codabench:**
-   - Upload the resulting `EXP-007_submission.zip` to Codabench Track 2 and verify breakthrough score $\ge 0.6500\text{ mADM}$.
+1. **Execute EXP-007 on Kaggle Dual Tesla T4 GPUs:**
+   - In Kaggle, run Cell 3 (pulls latest code) and Cell 4 (launches DDP training).
+2. **Monitor Training Progress:**
+   - Stage 1 (30 epochs): Visual representation warmup with Surveillance Degradation Transforms.
+   - Stage 2 (25 epochs): Cross-modal hyperspherical metric margin alignment (ArcFace + SDM).
+3. **Verify Codabench Submission Package:**
+   - Cell 5 automatically runs full ingestion simulation on the generated `EXP-007_submission.zip`.
+4. **Submit to Codabench Track 2:**
+   - Upload `EXP-007_submission.zip` to Codabench Challenge #18196.
 
 
 
