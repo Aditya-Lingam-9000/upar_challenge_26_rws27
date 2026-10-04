@@ -985,13 +985,29 @@
 - **Why It Changed / Rationale:**
   - Guarantees instant initialization (<1s), zero cloud FUSE hanging, and stable DDP synchronization across Kaggle Dual Tesla T4 GPUs.
 
+### Step 41: Per-Epoch Validation & Official Codabench Table Reporting
+- **Date / Timestamp:** 2026-10-04 23:09
+- **What Was Done:**
+  - Updated validation scheduling from every 5 epochs to **every single epoch** (`--eval_interval 1`).
+  - Integrated `print_codabench_table` into [`championship_pipeline/train.py`](file:///Users/sama/D/RWS2027/championship_pipeline/train.py):
+    - Prints official Codabench competition leaderboard table after every epoch showing `mADM`, `mAP`, `Rank-1`, `Rank-5`, `Rank-10`, `mINP`, and epoch runtime.
+  - Added real-time history logging saving every epoch's metrics to `checkpoints/EXP-007/EXP-007_history.json`.
+  - Updated [`notebooks/kaggle_exp007_championship_dual_gpu.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp007_championship_dual_gpu.ipynb) Cell 4 with `--eval_interval 1`.
+  - Verified locally on M1 Pro (`tests_championship/test_pipeline_local.py` passed all 6 tests).
+  - Pushed commit `2ab19d2` to GitHub `origin main`.
+- **What Changed / Created:**
+  - Updated [`championship_pipeline/train.py`](file:///Users/sama/D/RWS2027/championship_pipeline/train.py).
+  - Updated [`notebooks/kaggle_exp007_championship_dual_gpu.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp007_championship_dual_gpu.ipynb).
+- **Why It Changed / Rationale:**
+  - Delivers full visibility into performance evolution at every epoch with exact official competition metric scores.
+
 ---
 
 ## Next Steps Roadmap
-1. **Execute EXP-007 on Kaggle Dual Tesla T4 GPUs:**
-   - In Kaggle, interrupt the stuck cell, run Cell 3 (`git fetch origin && git reset --hard origin/main`), and run Cell 4.
-2. **Monitor Training Progress:**
-   - Observe instant dataset loading and RAM caching (~22s), followed by Stage 1 (30 epochs) and Stage 2 (25 epochs).
+1. **Pull Latest Code on Kaggle:**
+   - Run `!cd /kaggle/working/upar_challenge_26_rws27 && git fetch origin && git reset --hard origin/main`
+2. **Execute EXP-007 with Per-Epoch Validation:**
+   - Launch Cell 4; after each epoch (~3–4 min), observe the complete Codabench results table.
 3. **Verify Codabench Submission Package:**
    - Cell 5 automatically runs full ingestion simulation on the generated `EXP-007_submission.zip`.
 4. **Submit to Codabench Track 2:**
