@@ -12,6 +12,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
+import os
+import sys
+
+# Ensure repository root is in sys.path for direct execution or torchrun
+_curr_dir = os.path.dirname(os.path.abspath(__file__))
+_parent_dir = os.path.dirname(_curr_dir)
+if _parent_dir not in sys.path:
+    sys.path.insert(0, _parent_dir)
 
 from championship_pipeline.pseudo_descriptions import VOCAB_SIZE, MAX_TOKEN_LENGTH
 

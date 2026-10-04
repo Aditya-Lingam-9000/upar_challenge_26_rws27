@@ -25,6 +25,12 @@ import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 
+# Ensure repository root is in sys.path for direct execution or torchrun
+_curr_dir = os.path.dirname(os.path.abspath(__file__))
+_parent_dir = os.path.dirname(_curr_dir)
+if _parent_dir not in sys.path:
+    sys.path.insert(0, _parent_dir)
+
 from championship_pipeline.dataset import (
     CrossModalUPARDataset,
     get_championship_transforms,
