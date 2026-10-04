@@ -56,7 +56,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--backbone_lr_stage1", type=float, default=1.0e-4, help="Backbone learning rate in Stage 1")
     parser.add_argument("--backbone_lr_stage2", type=float, default=1.0e-6, help="Backbone learning rate in Stage 2 (0 = frozen)")
     parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
-    parser.add_argument("--num_workers", type=int, default=4, help="DataLoader workers per GPU")
+    parser.add_argument("--num_workers", type=int, default=2, help="DataLoader workers per GPU")
     parser.add_argument("--eval_interval", type=int, default=5, help="Epochs between retrieval validation")
     parser.add_argument("--no_preload_ram", action="store_true", help="Disable RAM byte caching")
     parser.add_argument("--no_fp16", action="store_true", help="Disable mixed precision")
@@ -109,15 +109,17 @@ def main() -> None:
 
     if is_main_process:
         os.makedirs(args.save_dir, exist_ok=True)
-        print("=" * 80)
-        print(f"[{args.exp_id}] Starting Championship Cross-Modal Training Run: {args.exp_id}")
-        print(f"[{args.exp_id}] Device: {device} | World Size (DDP): {world_size}")
-        print(f"[{args.exp_id}] Effective Global Batch Size: {args.batch_size * world_size}")
-        print(f"[{args.exp_id}] Stage 1 (PAR Warmup): {args.stage1_epochs} epochs | Stage 2 (ArcFace Margin): {args.stage2_epochs} epochs")
-        print("=" * 80)
+        print("=" * 80, flush=True)
+        print(f"[{args.exp_id}] Starting Championship Cross-Modal Training Run: {args.exp_id}", flush=True)
+        print(f"[{args.exp_id}] Device: {device} | World Size (DDP): {world_size}", flush=True)
+        print(f"[{args.exp_id}] Effective Global Batch Size: {args.batch_size * world_size}", flush=True)
+        print(f"[{args.exp_id}] Stage 1 (PAR Warmup): {args.stage1_epochs} epochs | Stage 2 (ArcFace Margin): {args.stage2_epochs} epochs", flush=True)
+        print("=" * 80, flush=True)
 
     # 1. Datasets & DataLoaders
     data_root = resolve_data_root(args.data_root)
+    if is_main_process:
+        print(f"[{args.exp_id}] Resolved Dataset Root: '{data_root}'", flush=True)
     preload_ram = not args.no_preload_ram
 
     train_dataset = CrossModalUPARDataset(
@@ -142,33 +144,38 @@ def main() -> None:
         drop_last=True,
     )
 
-    # Validation dataset (loaded on rank 0 for evaluation)
-    val_dataset = CrossModalUPARDataset(
-        data_root=data_root,
-        split="val",
-        transform=get_championship_transforms(height=256, width=128, is_train=False),
-        preload_to_ram=preload_ram,
-    )
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=args.val_batch_size,
-        shuffle=False,
-        num_workers=args.num_workers,
-        pin_memory=(device.type == "cuda"),
-    )
+    # Validation dataset (loaded ONLY on rank 0 to save RAM and eliminate redundant compute)
+    val_dataset = None
+    val_loader = None
+    val_queries = None
+    val_gallery_gt = None
 
-    # Load validation queries from task2_queries_val.json or generate from attributes
-    val_queries_json = os.path.join(data_root, "task2_queries_val.json")
-    if os.path.exists(val_queries_json):
-        with open(val_queries_json, "r", encoding="utf-8") as f:
-            q_raw = json.load(f)
-            val_queries = np.asarray(q_raw, dtype=np.float32)
-    else:
-        # Fallback: take first 500 distinct attribute vectors from val set as queries
-        all_val_attrs = np.array([s["attr_vec"] for s in val_dataset.samples], dtype=np.float32)
-        val_queries = np.unique(all_val_attrs, axis=0)[:500]
+    if is_main_process:
+        print(f"[{args.exp_id}] Initializing validation dataset on master rank...", flush=True)
+        val_dataset = CrossModalUPARDataset(
+            data_root=data_root,
+            split="val",
+            transform=get_championship_transforms(height=256, width=128, is_train=False),
+            preload_to_ram=preload_ram,
+        )
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=args.val_batch_size,
+            shuffle=False,
+            num_workers=args.num_workers,
+            pin_memory=(device.type == "cuda"),
+        )
 
-    val_gallery_gt = np.array([s["attr_vec"] for s in val_dataset.samples], dtype=np.float32)
+        val_queries_json = os.path.join(data_root, "task2_queries_val.json")
+        if os.path.exists(val_queries_json):
+            with open(val_queries_json, "r", encoding="utf-8") as f:
+                q_raw = json.load(f)
+                val_queries = np.asarray(q_raw, dtype=np.float32)
+        else:
+            all_val_attrs = np.array([s["attr_vec"] for s in val_dataset.samples], dtype=np.float32)
+            val_queries = np.unique(all_val_attrs, axis=0)[:500]
+
+        val_gallery_gt = np.array([s["attr_vec"] for s in val_dataset.samples], dtype=np.float32)
 
     # 2. Build Championship Network
     model = CrossModalChampionshipNet(pretrained=True).to(device)
@@ -304,8 +311,11 @@ def main() -> None:
                 build_championship_submission(raw_model, sub_zip, save_fp16=True)
                 print(f"[{args.exp_id}] Auto-built verified submission zip: {sub_zip}", flush=True)
 
+        if is_ddp:
+            dist.barrier()
+
     if is_main_process:
-        print("=" * 80)
+        print("=" * 80, flush=True)
         print(f"[{args.exp_id}] Championship Training Complete! Peak Val mADM: {best_madm:.6f}")
         print("=" * 80)
 

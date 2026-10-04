@@ -103,27 +103,67 @@ def get_championship_transforms(
         ])
 
 
+_DATA_ROOT_CACHE: dict[str, str] = {}
+
+
 def resolve_data_root(data_root: str) -> str:
-    """Intelligently locate directory containing annotations and images."""
-    data_root = os.path.abspath(os.path.expanduser(data_root))
-    if os.path.exists(os.path.join(data_root, "annotations", "train.csv")):
-        return data_root
+    """Intelligently locate directory containing annotations and images in <0.01s."""
+    raw_key = str(data_root).strip() if data_root else ""
+    if raw_key in _DATA_ROOT_CACHE:
+        return _DATA_ROOT_CACHE[raw_key]
 
-    candidates = [
-        os.path.join(data_root, "data"),
-        os.path.join(data_root, "UPAR-Challenge-2027", "data"),
-        os.path.join(data_root, "upar-challenge-2027-data", "data"),
-    ]
-    for cand in candidates:
-        if os.path.exists(os.path.join(cand, "annotations", "train.csv")):
-            return cand
+    # 1. Direct candidate checks (instant stat checks without walking)
+    direct_candidates = []
+    if raw_key:
+        direct_candidates.extend([
+            raw_key,
+            os.path.abspath(os.path.expanduser(raw_key)),
+            os.path.join(raw_key, "data"),
+            os.path.join(raw_key, "UPAR-Challenge-2027", "data"),
+        ])
 
+    # Add standard Kaggle / local environment paths
+    direct_candidates.extend([
+        "/kaggle/input/datasets/hinewk/upar-challenge-2027-data/data",
+        "/kaggle/input/datasets/hinewk/upar-challenge-2027-data",
+        "/kaggle/input/upar-challenge-2027-data/data",
+        "/kaggle/input/upar-challenge-2027-data",
+        "/kaggle/input/upar-challenge-2027/data",
+        "/kaggle/input/upar-challenge-2027",
+        "/kaggle/input/wacv2027-track2/data",
+        "/kaggle/input/wacv2027-track2",
+        "data",
+        "UPAR-Challenge-2027/data",
+        os.path.join(os.getcwd(), "data"),
+        os.path.join(os.getcwd(), "UPAR-Challenge-2027", "data"),
+    ])
+
+    for cand in direct_candidates:
+        if cand and os.path.exists(os.path.join(cand, "annotations", "train.csv")):
+            res = os.path.abspath(cand)
+            _DATA_ROOT_CACHE[raw_key] = res
+            return res
+        if cand and os.path.exists(os.path.join(cand, "data", "annotations", "train.csv")):
+            res = os.path.abspath(os.path.join(cand, "data"))
+            _DATA_ROOT_CACHE[raw_key] = res
+            return res
+
+    # 2. Fast pruned walk only if candidates fail (NEVER recurse into image folders!)
     if os.path.exists("/kaggle/input"):
         for root, dirs, files in os.walk("/kaggle/input"):
+            # CRITICAL: Prune massive image directories so walk takes <0.05s
+            dirs[:] = [d for d in dirs if d not in (
+                "Market1501", "PA100k", "PETA", "images", "imgs",
+                "bounding_box_train", "bounding_box_test", "query"
+            )]
             if "train.csv" in files and os.path.basename(root) == "annotations":
-                return os.path.dirname(root)
+                res = os.path.abspath(os.path.dirname(root))
+                _DATA_ROOT_CACHE[raw_key] = res
+                return res
 
-    return data_root
+    fallback = os.path.abspath(os.path.expanduser(raw_key)) if raw_key else os.getcwd()
+    _DATA_ROOT_CACHE[raw_key] = fallback
+    return fallback
 
 
 class CrossModalUPARDataset(Dataset):

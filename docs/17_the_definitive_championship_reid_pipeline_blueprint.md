@@ -1,17 +1,17 @@
 # The Definitive Championship Re-ID Pipeline Blueprint: Architecture, Training Protocols, and Inference Strategy
 
-> **Document ID:** `BLUEPRINT-CHAMPIONSHIP-001`  
-> **Challenge:** WACV 2027 Workshop on Real-World Surveillance (Track 2: Attribute-based Person Retrieval)  
-> **Target Score:** $\mathbf{\ge 0.6500\text{ mADM}}$ (Surpassing Leaderboard #1: $0.6280$)  
-> **Target Framework:** Cross-Modal Metric Learning with Soft Pseudo-Descriptions + Hard Binary Adapters  
-> **Author:** Antigravity Autonomous Research & Systems Engineering Team  
-> **Status:** **ACTIONABLE CHAMPIONSHIP IMPLEMENTATION BLUEPRINT**  
+> **Document ID:** `BLUEPRINT-CHAMPIONSHIP-001`
+> **Challenge:** WACV 2027 Workshop on Real-World Surveillance (Track 2: Attribute-based Person Retrieval)
+> **Target Score:** $\mathbf{\ge 0.6500\text{ mADM}}$ (Surpassing Leaderboard #1: $0.6280$)
+> **Target Framework:** Cross-Modal Metric Learning with Soft Pseudo-Descriptions + Hard Binary Adapters
+> **Author:** Antigravity Autonomous Research & Systems Engineering Team
+> **Status:** **ACTIONABLE CHAMPIONSHIP IMPLEMENTATION BLUEPRINT**
 
 ---
 
 ## 1. System Overview & Architectural Topology
 
-To permanently dismantle the $0.4500\text{ mADM}$ ceiling and claim the #1 spot on the Codabench leaderboard, our championship pipeline completely abandons the 40-dimensional probability bottleneck. 
+To permanently dismantle the $0.4500\text{ mADM}$ ceiling and claim the #1 spot on the Codabench leaderboard, our championship pipeline completely abandons the 40-dimensional probability bottleneck.
 
 Instead, it implements a **Dual-Stream Cross-Modal Metric Learning Network** that maps surveillance pedestrian crops and natural language attribute queries into a shared, continuous **1024-dimensional hyperspherical manifold**:
 
@@ -33,13 +33,13 @@ flowchart TD
     subgraph QUERY_STREAM["3. Cross-Modal Query Stream"]
         ATTR --> HARD_ADAPT["Hard Adapter f_ret^attr (3-Layer MLP)"]
         HARD_ADAPT --> E_H["Hard Query Embedding E^h in R^512"]
-        
+      
         ATTR --> PROMPT_ENGINE["Pseudo-Description Template Engine"]
         PROMPT_ENGINE --> TEXT["Natural Language Sentence: 'A young female with short hair...'"]
         TEXT --> TEXT_ENC["Pretrained Language Encoder (DistilBERT / CLIP-Text)"]
         TEXT_ENC --> SOFT_ADAPT["Soft Adapter f_ret^text (3-Layer MLP)"]
         SOFT_ADAPT --> E_S["Soft Query Embedding E^s in R^512"]
-        
+      
         E_H & E_S --> CAT["Concatenation: E^q = [E^h ; E^s] in R^1024"]
         CAT --> NORM_Q["L2-Normalization: E^q / ||E^q||"]
     end
@@ -65,6 +65,7 @@ Surveillance images in the target domain (MEVID) suffer from extreme physical de
 Our championship augmentation protocol explicitly synthesizes these physical degradations during training:
 
 ### 2.1 The Surveillance Degradation Pipeline (SRDM)
+
 ```python
 import torchvision.transforms as T
 import random
@@ -101,6 +102,7 @@ class SurveillanceMotionBlur:
 ```
 
 ### 2.2 Canonical Training Transform
+
 * **Target Resolution:** $256 \times 128$ (Height $\times$ Width, standard $2:1$ pedestrian aspect ratio).
 * **Augmentation Sequence:**
   1. `Resize((256, 128))`
@@ -172,6 +174,7 @@ class PseudoDescriptionEngine:
 ## 4. Model Architecture & Adapter Specifications
 
 ### 4.1 Visual Backbone & Adapter
+
 * **Backbone:** SOLIDER Swin-Tiny (`swin_t`, pre-trained on human-centric representations, embedding dimension $D_v = 768$).
 * **Visual Adapter ($f_{\text{ret}}^{\text{vis}}$):**
   - Layer 1: `Linear(768, 768)` $\to$ `LayerNorm(768)` $\to$ `GELU()` $\to$ `Dropout(0.2)`
@@ -180,6 +183,7 @@ class PseudoDescriptionEngine:
   - Output: $\mathbf{E}^p \in \mathbb{R}^{B \times 1024}$
 
 ### 4.2 Hard Attribute Adapter ($f_{\text{ret}}^{\text{attr}}$)
+
 * **Input:** Raw binary attribute vector $\mathbf{h} \in \{0, 1\}^{40}$.
 * **Architecture:**
   - Layer 1: `Linear(40, 256)` $\to$ `ReLU()` $\to$ `Dropout(0.1)`
@@ -188,6 +192,7 @@ class PseudoDescriptionEngine:
   - Output: $\mathbf{E}^h \in \mathbb{R}^{B \times 512}$
 
 ### 4.3 Soft Pseudo-Description Adapter ($f_{\text{ret}}^{\text{text}}$)
+
 * **Text Encoder:** Pretrained DistilBERT (`distilbert-base-uncased`, 66M params, outputs 768-D sequence embeddings). Fast and compact ($<150\text{ MB}$ unquantized, $<75\text{ MB}$ FP16).
 * **Architecture:**
   - Layer 1: `Linear(768, 768)` $\to$ `ReLU()` $\to$ `Dropout(0.1)`
@@ -196,7 +201,11 @@ class PseudoDescriptionEngine:
   - Output: $\mathbf{E}^s \in \mathbb{R}^{B \times 512}$
 
 ### 4.4 Unified Query Representation
-$$\mathbf{E}^q = \left[ \mathbf{E}^h \;;\; \mathbf{E}^s \right] \in \mathbb{R}^{B \times 1024}$$
+
+$$
+\mathbf{E}^q = \left[ \mathbf{E}^h \;;\; \mathbf{E}^s \right] \in \mathbb{R}^{B \times 1024}
+$$
+
 Both $\mathbf{E}^p$ and $\mathbf{E}^q$ are $L_2$-normalized to reside on the unit hypersphere $\mathbb{S}^{1023}$.
 
 ---
@@ -224,6 +233,7 @@ Stage 2: Cross-Modal Additive Angular Margin Learning
 ```
 
 ### 5.1 Additive Angular Margin Loss Implementation
+
 ```python
 import torch
 import torch.nn as nn
@@ -264,6 +274,7 @@ class AdditiveAngularMarginLoss(nn.Module):
 ```
 
 ### 5.2 Stage 2 Hyperparameters
+
 * **Optimizer:** AdamW ($\beta_1 = 0.9, \beta_2 = 0.999$, weight decay = $1\times 10^{-4}$).
 * **Adapter Learning Rate:** $3.5 \times 10^{-4}$ with Linear Warmup (3 epochs) + Cosine Decay to $1 \times 10^{-6}$.
 * **Visual Backbone Learning Rate:** $0.0$ (Frozen) for epochs 1–15; $1.0 \times 10^{-6}$ (Differential Fine-Tuning) for epochs 16–25.
@@ -275,20 +286,32 @@ class AdditiveAngularMarginLoss(nn.Module):
 ## 6. Fast Inference & Reranking Pipeline
 
 ### 6.1 Codabench CPU Ingestion Workflow
+
 During execution of `rank_gallery(sample)` on the Codabench server:
+
 1. **Pre-computation:**
    Pass all $G$ gallery images through the visual backbone + visual adapter:
-   $$\mathbf{E}^p \in \mathbb{R}^{G \times 1024}$$
+   $$
+   \mathbf{E}^p \in \mathbb{R}^{G \times 1024}
+   $$
+
    Normalized: $\hat{\mathbf{E}}^p = \mathbf{E}^p / \|\mathbf{E}^p\|_2$.
 2. **Query Encoding:**
    Pass the $Q$ queries through the query stream:
-   $$\hat{\mathbf{E}}^q = \left[ \mathbf{E}^h \;;\; \mathbf{E}^s \right] \in \mathbb{R}^{Q \times 1024}$$
+   $$
+   \hat{\mathbf{E}}^q = \left[ \mathbf{E}^h \;;\; \mathbf{E}^s \right] \in \mathbb{R}^{Q \times 1024}
+   $$
 3. **Primary Similarity Matrix:**
-   $$\mathbf{S} = \hat{\mathbf{E}}^q \left( \hat{\mathbf{E}}^p \right)^T \in [-1, 1]^{Q \times G}$$
+   $$
+   \mathbf{S} = \hat{\mathbf{E}}^q \left( \hat{\mathbf{E}}^p \right)^T \in [-1, 1]^{Q \times G}
+   $$
+
    Base Distance: $\mathbf{D}_{\text{base}} = 1.0 - \mathbf{S} \in [0, 2]^{Q \times G}$.
 
 ### 6.2 Vectorized $k$-Reciprocal Reranking
+
 To extract maximum performance, we execute vectorized $k$-reciprocal reranking:
+
 ```python
 def fast_reciprocal_rerank(probFeat: np.ndarray, galFeat: np.ndarray, k1: int = 20, k2: int = 6, lambda_value: float = 0.3) -> np.ndarray:
     """Optimized NumPy implementation of k-reciprocal reranking.
