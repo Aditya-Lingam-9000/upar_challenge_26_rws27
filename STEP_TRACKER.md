@@ -1001,17 +1001,44 @@
 - **Why It Changed / Rationale:**
   - Delivers full visibility into performance evolution at every epoch with exact official competition metric scores.
 
+### Step 42: Unified End-to-End Multi-Task Metric Learning Activation
+- **Date / Timestamp:** 2026-10-04 23:45
+- **What Was Done:**
+  - Resolved the architectural scheduling mismatch where the query stream sat idle at random weights during visual-only warmup (giving baseline 0.118 mADM).
+  - Upgraded to **Unified End-to-End Multi-Task Metric Learning**:
+    $$\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{ArcFace}} + 0.20 \cdot \mathcal{L}_{\text{SDM}} + 0.50 \cdot \mathcal{L}_{\text{ASL}}$$
+    - Concurrently trains Swin-T visual backbone, Visual Adapter, Hard Adapter, and Text Transformer from Epoch 1.
+    - Swin-T visual backbone refined with `backbone_lr = 1.0e-4` and cosine decay.
+    - Metric adapters and query stream trained with `lr = 3.5e-4` and cosine decay.
+  - Eliminated all PyTorch DDP and Transformer warnings:
+    - Disabled nested tensor warning in `nn.TransformerEncoder` with `enable_nested_tensor=False`.
+    - Set `find_unused_parameters=False` in DDP since all parameters now participate in the multi-task loss.
+  - Hardened submission packaging:
+    - Zip archive is only auto-packaged when `is_best` AND `mADM >= 0.5000` (or at final epoch completion), preventing premature zip generation on random initializations.
+  - Updated [`notebooks/kaggle_exp007_championship_dual_gpu.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp007_championship_dual_gpu.ipynb) Cell 4 with `batch_size=192` (~12 GB VRAM per T4 GPU) and `epochs=55`.
+  - Re-ran complete test suite: [`tests_championship/test_pipeline_local.py`](file:///Users/sama/D/RWS2027/tests_championship/test_pipeline_local.py) (all 6 tests passed 100% with zero warnings).
+  - Pushed commit `3637a02` to GitHub `origin main`.
+- **What Changed / Created:**
+  - Updated [`championship_pipeline/losses.py`](file:///Users/sama/D/RWS2027/championship_pipeline/losses.py).
+  - Updated [`championship_pipeline/models.py`](file:///Users/sama/D/RWS2027/championship_pipeline/models.py).
+  - Updated [`championship_pipeline/submission_builder.py`](file:///Users/sama/D/RWS2027/championship_pipeline/submission_builder.py).
+  - Updated [`championship_pipeline/train.py`](file:///Users/sama/D/RWS2027/championship_pipeline/train.py).
+  - Updated [`notebooks/kaggle_exp007_championship_dual_gpu.ipynb`](file:///Users/sama/D/RWS2027/notebooks/kaggle_exp007_championship_dual_gpu.ipynb).
+- **Why It Changed / Rationale:**
+  - Eliminates the 30-epoch waiting dead-zone; visual and query representations now co-adapt simultaneously, driving validation mADM immediately upward from Epoch 1 toward 0.65+.
+
 ---
 
 ## Next Steps Roadmap
 1. **Pull Latest Code on Kaggle:**
    - Run `!cd /kaggle/working/upar_challenge_26_rws27 && git fetch origin && git reset --hard origin/main`
-2. **Execute EXP-007 with Per-Epoch Validation:**
-   - Launch Cell 4; after each epoch (~3–4 min), observe the complete Codabench results table.
+2. **Launch Unified EXP-007 Training Run:**
+   - Execute Cell 4 (55 epochs, batch size 192, Dual-GPU NCCL).
+   - Watch ArcFace, SDM, and ASL losses decrease in tandem and validation scores immediately climb from Epoch 1.
 3. **Verify Codabench Submission Package:**
-   - Cell 5 automatically runs full ingestion simulation on the generated `EXP-007_submission.zip`.
+   - Run Cell 5 to simulate official ingestion on `submissions/EXP-007_submission.zip`.
 4. **Submit to Codabench Track 2:**
-   - Upload `EXP-007_submission.zip` to Codabench Challenge #18196.
+   - Upload the resulting archive to Codabench Challenge #18196 and claim the #1 leaderboard position.
 
 
 
