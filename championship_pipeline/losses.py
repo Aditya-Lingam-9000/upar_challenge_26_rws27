@@ -133,30 +133,31 @@ class AsymmetricLoss(nn.Module):
 
 
 class ChampionshipLoss(nn.Module):
-    """Unified loss engine orchestrating Stage 1 PAR warmup and Stage 2 Metric Learning."""
+    """Unified Multi-Task Loss Engine: Dual ArcFace + SDM + Asymmetric Classification."""
 
     def __init__(
         self,
-        stage: int = 2,
         s: float = 30.0,
         m: float = 0.35,
         beta_hard: float = 0.30,
         beta_soft: float = 0.70,
         beta_sdm: float = 0.20,
+        beta_asl: float = 0.50,
+        stage: int | None = None,
     ):
         super().__init__()
-        self.stage = stage
         self.beta_hard = beta_hard
         self.beta_soft = beta_soft
         self.beta_sdm = beta_sdm
+        self.beta_asl = beta_asl
 
         self.arcface = AdditiveAngularMarginLoss(s=s, m=m)
         self.sdm = SimilarityDistributionMatchingLoss(tau=0.02)
         self.asl = AsymmetricLoss(gamma_neg=4.0, gamma_pos=0.0, clip=0.05)
-        self.bce = nn.BCEWithLogitsLoss()
 
     def set_stage(self, stage: int) -> None:
-        self.stage = stage
+        """Legacy no-op compatibility method."""
+        pass
 
     def forward(
         self,
@@ -164,40 +165,41 @@ class ChampionshipLoss(nn.Module):
         targets: torch.Tensor,
         identity_labels: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
-        """Compute multi-task loss depending on active training stage."""
+        """Compute unified multi-task loss aligning cross-modal embeddings and attribute logits."""
         loss_dict = {}
 
-        if self.stage == 1:
-            # Stage 1: Representation warmup via multi-label classification
-            aux_logits = model_outputs["aux_logits"]
+        # 1. Multi-label visual classification (ASL)
+        aux_logits = model_outputs.get("aux_logits")
+        if aux_logits is not None:
             loss_asl = self.asl(aux_logits, targets)
-            loss_dict["loss_asl"] = loss_asl
-            loss_dict["total_loss"] = loss_asl
-
         else:
-            # Stage 2: Cross-modal hyperspherical metric learning
-            norm_v = model_outputs["norm_visual"]   # (B, 1024)
-            norm_q = model_outputs["norm_query"]    # (B, 1024)
-            norm_h = model_outputs["norm_hard"]     # (B, 512)
-            norm_s = model_outputs["norm_soft"]     # (B, 512)
+            loss_asl = torch.tensor(0.0, device=targets.device)
 
-            # Visual slice corresponding to hard (first 512-D) and soft (last 512-D)
-            norm_v_h = F.normalize(norm_v[:, :512], p=2, dim=-1)
-            norm_v_s = F.normalize(norm_v[:, 512:], p=2, dim=-1)
+        # 2. Cross-modal hyperspherical metric learning
+        norm_v = model_outputs["norm_visual"]   # (B, 1024)
+        norm_q = model_outputs["norm_query"]    # (B, 1024)
+        norm_h = model_outputs["norm_hard"]     # (B, 512)
+        norm_s = model_outputs["norm_soft"]     # (B, 512)
 
-            loss_arcface_hard = self.arcface(norm_v_h, norm_h)
-            loss_arcface_soft = self.arcface(norm_v_s, norm_s)
-            loss_sdm = self.sdm(norm_v, norm_q, identity_labels)
+        # Visual slice corresponding to hard (first 512-D) and soft (last 512-D)
+        norm_v_h = F.normalize(norm_v[:, :512], p=2, dim=-1)
+        norm_v_s = F.normalize(norm_v[:, 512:], p=2, dim=-1)
 
-            total_loss = (
-                self.beta_hard * loss_arcface_hard
-                + self.beta_soft * loss_arcface_soft
-                + self.beta_sdm * loss_sdm
-            )
+        loss_arcface_hard = self.arcface(norm_v_h, norm_h)
+        loss_arcface_soft = self.arcface(norm_v_s, norm_s)
+        loss_sdm = self.sdm(norm_v, norm_q, identity_labels)
 
-            loss_dict["loss_arcface_hard"] = loss_arcface_hard
-            loss_dict["loss_arcface_soft"] = loss_arcface_soft
-            loss_dict["loss_sdm"] = loss_sdm
-            loss_dict["total_loss"] = total_loss
+        total_loss = (
+            self.beta_hard * loss_arcface_hard
+            + self.beta_soft * loss_arcface_soft
+            + self.beta_sdm * loss_sdm
+            + self.beta_asl * loss_asl
+        )
+
+        loss_dict["loss_arcface_hard"] = loss_arcface_hard
+        loss_dict["loss_arcface_soft"] = loss_arcface_soft
+        loss_dict["loss_sdm"] = loss_sdm
+        loss_dict["loss_asl"] = loss_asl
+        loss_dict["total_loss"] = total_loss
 
         return loss_dict

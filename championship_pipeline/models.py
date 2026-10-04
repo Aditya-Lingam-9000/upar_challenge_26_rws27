@@ -122,7 +122,7 @@ class QueryStream(nn.Module):
             batch_first=True,
             norm_first=True,
         )
-        self.text_transformer = nn.TransformerEncoder(encoder_layer, num_layers=3)
+        self.text_transformer = nn.TransformerEncoder(encoder_layer, num_layers=3, enable_nested_tensor=False)
 
         self.text_adapter = nn.Sequential(
             nn.LayerNorm(text_dim),

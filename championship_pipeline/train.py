@@ -48,18 +48,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data_root", type=str, default="UPAR-Challenge-2027/data", help="Root data folder")
     parser.add_argument("--save_dir", type=str, default="checkpoints/EXP-007", help="Directory to save checkpoints")
     parser.add_argument("--exp_id", type=str, default="EXP-007", help="Unique experiment identifier")
-    parser.add_argument("--batch_size", type=int, default=128, help="Batch size per GPU (global batch = batch_size * gpus)")
+    parser.add_argument("--batch_size", type=int, default=192, help="Batch size per GPU (global batch = batch_size * gpus)")
     parser.add_argument("--val_batch_size", type=int, default=128, help="Batch size for validation inference")
-    parser.add_argument("--stage1_epochs", type=int, default=30, help="Epochs for Stage 1 visual warmup")
-    parser.add_argument("--stage2_epochs", type=int, default=25, help="Epochs for Stage 2 cross-modal margin learning")
-    parser.add_argument("--lr", type=float, default=3.5e-4, help="Peak learning rate for adapters")
-    parser.add_argument("--backbone_lr_stage1", type=float, default=1.0e-4, help="Backbone learning rate in Stage 1")
-    parser.add_argument("--backbone_lr_stage2", type=float, default=1.0e-6, help="Backbone learning rate in Stage 2 (0 = frozen)")
+    parser.add_argument("--epochs", type=int, default=55, help="Total epochs for Unified Multi-Task Training")
+    parser.add_argument("--lr", type=float, default=3.5e-4, help="Peak learning rate for metric adapters and query stream")
+    parser.add_argument("--backbone_lr", type=float, default=1.0e-4, help="Learning rate for Swin-T visual backbone")
+    parser.add_argument("--min_lr", type=float, default=1.0e-6, help="Minimum learning rate for cosine scheduler")
     parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
     parser.add_argument("--num_workers", type=int, default=2, help="DataLoader workers per GPU")
-    parser.add_argument("--eval_interval", type=int, default=1, help="Epochs between retrieval validation (default: 1 for every epoch)")
+    parser.add_argument("--eval_interval", type=int, default=1, help="Epochs between retrieval validation")
     parser.add_argument("--no_preload_ram", action="store_true", help="Disable RAM byte caching")
     parser.add_argument("--no_fp16", action="store_true", help="Disable mixed precision")
+    # Backwards compatibility legacy args
+    parser.add_argument("--stage1_epochs", type=int, default=0, help="Legacy compatibility arg")
+    parser.add_argument("--stage2_epochs", type=int, default=0, help="Legacy compatibility arg")
+    parser.add_argument("--backbone_lr_stage1", type=float, default=0.0, help="Legacy compatibility arg")
+    parser.add_argument("--backbone_lr_stage2", type=float, default=0.0, help="Legacy compatibility arg")
     return parser.parse_args()
 
 
@@ -135,13 +139,17 @@ def main() -> None:
     world_size = get_world_size()
     is_main_process = rank == 0
 
+    total_epochs = args.epochs
+    if (args.stage1_epochs + args.stage2_epochs) > 0 and args.epochs == 55:
+        total_epochs = args.stage1_epochs + args.stage2_epochs
+
     if is_main_process:
         os.makedirs(args.save_dir, exist_ok=True)
         print("=" * 80, flush=True)
         print(f"[{args.exp_id}] Starting Championship Cross-Modal Training Run: {args.exp_id}", flush=True)
         print(f"[{args.exp_id}] Device: {device} | World Size (DDP): {world_size}", flush=True)
         print(f"[{args.exp_id}] Effective Global Batch Size: {args.batch_size * world_size}", flush=True)
-        print(f"[{args.exp_id}] Stage 1 (PAR Warmup): {args.stage1_epochs} epochs | Stage 2 (ArcFace Margin): {args.stage2_epochs} epochs", flush=True)
+        print(f"[{args.exp_id}] Mode: Unified End-to-End Metric Learning (ArcFace + SDM + ASL) | Epochs: {total_epochs}", flush=True)
         print("=" * 80, flush=True)
 
     # 1. Datasets & DataLoaders
@@ -208,9 +216,9 @@ def main() -> None:
     # 2. Build Championship Network
     model = CrossModalChampionshipNet(pretrained=True).to(device)
     if is_ddp:
-        model = DDP(model, device_ids=[device.index], find_unused_parameters=True)
+        model = DDP(model, device_ids=[device.index], find_unused_parameters=False)
 
-    criterion = ChampionshipLoss(stage=1, s=30.0, m=0.35).to(device)
+    criterion = ChampionshipLoss(s=30.0, m=0.35, beta_hard=0.30, beta_soft=0.70, beta_sdm=0.20, beta_asl=0.50).to(device)
     use_fp16 = not args.no_fp16 and (device.type == "cuda")
     scaler = torch.amp.GradScaler(device.type, enabled=use_fp16)
 
@@ -219,49 +227,32 @@ def main() -> None:
     history: list[dict[str, Any]] = []
     engine = PseudoDescriptionEngine()
 
-    total_epochs = args.stage1_epochs + args.stage2_epochs
+    # Differential Learning Rates:
+    # 1. Swin-T visual backbone: backbone_lr (1.0e-4) to refine pretrained features smoothly
+    # 2. Metric adapters & query stream: lr (3.5e-4) to learn cross-modal projections
+    backbone_lr = args.backbone_lr
+    if args.backbone_lr_stage1 > 0.0:
+        backbone_lr = args.backbone_lr_stage1
+
+    param_groups = [
+        {"params": raw_model.visual_stream.backbone.parameters(), "lr": backbone_lr},
+        {"params": raw_model.visual_stream.visual_adapter.parameters(), "lr": args.lr},
+        {"params": raw_model.visual_stream.aux_head.parameters(), "lr": args.lr},
+        {"params": raw_model.query_stream.parameters(), "lr": args.lr},
+    ]
+    optimizer = torch.optim.AdamW(param_groups, weight_decay=args.weight_decay)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=total_epochs, eta_min=args.min_lr
+    )
+
+    if is_main_process:
+        print(f"[{args.exp_id}] === UNIFIED MULTI-TASK METRIC LEARNING ACTIVATED ({total_epochs} epochs) ===", flush=True)
+        print(f"[{args.exp_id}] Backbone LR: {backbone_lr:.2e} | Adapters LR: {args.lr:.2e} | Min LR: {args.min_lr:.2e}", flush=True)
+        print(f"[{args.exp_id}] Active Losses: ArcFace (Hard + Soft) + SDM (InfoNCE) + ASL Classification", flush=True)
 
     for epoch in range(1, total_epochs + 1):
-        current_stage = 1 if epoch <= args.stage1_epochs else 2
-        criterion.set_stage(current_stage)
-
         if is_ddp and train_sampler is not None:
             train_sampler.set_epoch(epoch)
-
-        # Configure Stage-Specific Optimizers
-        if epoch == 1 or epoch == (args.stage1_epochs + 1):
-            if current_stage == 1:
-                optimizer = torch.optim.AdamW(
-                    model.parameters(),
-                    lr=args.backbone_lr_stage1,
-                    weight_decay=args.weight_decay,
-                )
-                scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                    optimizer, T_max=args.stage1_epochs, eta_min=1e-6
-                )
-                if is_main_process:
-                    print(f"[{args.exp_id}] === STAGE 1: Visual Representation Warmup Initialized ({args.stage1_epochs} epochs) ===", flush=True)
-            else:
-                # Stage 2: Cross-Modal Hyperspherical Metric Learning
-                if args.backbone_lr_stage2 == 0.0:
-                    raw_model.visual_stream.freeze_backbone()
-                    param_groups = [
-                        {"params": raw_model.visual_stream.visual_adapter.parameters(), "lr": args.lr},
-                        {"params": raw_model.query_stream.parameters(), "lr": args.lr},
-                    ]
-                else:
-                    raw_model.visual_stream.unfreeze_backbone()
-                    param_groups = [
-                        {"params": raw_model.visual_stream.backbone.parameters(), "lr": args.backbone_lr_stage2},
-                        {"params": raw_model.visual_stream.visual_adapter.parameters(), "lr": args.lr},
-                        {"params": raw_model.query_stream.parameters(), "lr": args.lr},
-                    ]
-                optimizer = torch.optim.AdamW(param_groups, weight_decay=args.weight_decay)
-                scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                    optimizer, T_max=args.stage2_epochs, eta_min=1e-6
-                )
-                if is_main_process:
-                    print(f"[{args.exp_id}] === STAGE 2: Additive Angular Margin Metric Learning Initialized ({args.stage2_epochs} epochs) ===", flush=True)
 
         model.train()
         epoch_loss = 0.0
@@ -289,13 +280,14 @@ def main() -> None:
             steps += 1
 
             if is_main_process and (batch_idx + 1) % 50 == 0:
-                cur_lr = optimizer.param_groups[0]["lr"]
+                cur_lr = optimizer.param_groups[1]["lr"]
                 elapsed_b = time.time() - t_epoch_start
                 imgs_per_sec = (batch_idx + 1) * args.batch_size * world_size / elapsed_b
                 print(
-                    f"[{args.exp_id}] Ep [{epoch:02d}/{total_epochs:02d}] (S{current_stage}) | "
+                    f"[{args.exp_id}] Ep [{epoch:02d}/{total_epochs:02d}] | "
                     f"Batch [{batch_idx+1:04d}/{len(train_loader):04d}] | "
-                    f"Loss: {loss.item():.4f} | LR: {cur_lr:.2e} | Speed: {imgs_per_sec:.1f} img/s",
+                    f"Loss: {loss.item():.4f} (ArcH: {loss_dict['loss_arcface_hard'].item():.2f}, ArcS: {loss_dict['loss_arcface_soft'].item():.2f}, SDM: {loss_dict['loss_sdm'].item():.2f}, ASL: {loss_dict['loss_asl'].item():.2f}) | "
+                    f"LR: {cur_lr:.2e} | Speed: {imgs_per_sec:.1f} img/s",
                     flush=True,
                 )
 
@@ -303,10 +295,10 @@ def main() -> None:
         avg_loss = epoch_loss / max(1, steps)
 
         if is_main_process:
-            print(f"[{args.exp_id}] Epoch {epoch:02d} Complete. Avg Loss: {avg_loss:.4f} (Stage {current_stage})", flush=True)
+            print(f"[{args.exp_id}] Epoch {epoch:02d} Complete. Avg Loss: {avg_loss:.4f}", flush=True)
 
         # 3. Periodic Retrieval Evaluation on Rank 0
-        if is_main_process and (epoch % args.eval_interval == 0 or epoch == total_epochs or epoch == args.stage1_epochs):
+        if is_main_process and (epoch % args.eval_interval == 0 or epoch == total_epochs):
             print(f"\n[{args.exp_id}] Running validation retrieval in continuous 1024-D metric space ({len(val_dataset.samples)} gallery images, {len(val_queries)} queries)...", flush=True)
             metrics = evaluate_crossmodal_retrieval(
                 model=raw_model,
@@ -333,7 +325,6 @@ def main() -> None:
             # Record in training history log
             history_record = {
                 "epoch": epoch,
-                "stage": current_stage,
                 "train_loss": avg_loss,
                 "val_mADM": metrics["mADM"],
                 "val_mAP": metrics["mAP"],
@@ -342,7 +333,7 @@ def main() -> None:
                 "val_Rank-10": metrics["Rank-10"],
                 "val_mINP": metrics["mINP"],
                 "eval_time": metrics["eval_time"],
-                "lr": optimizer.param_groups[0]["lr"],
+                "lr": optimizer.param_groups[1]["lr"],
             }
             history.append(history_record)
             history_path = os.path.join(args.save_dir, f"{args.exp_id}_history.json")
@@ -359,18 +350,27 @@ def main() -> None:
                 torch.save({"epoch": epoch, "model_state_dict": raw_model.state_dict(), "metrics": metrics}, best_path)
                 print(f"[{args.exp_id}] *** NEW BEST VALIDATION mADM: {best_madm:.6f}! Checkpoint Saved: {best_path} ***", flush=True)
 
-                # Auto-package championship submission zip
-                sub_zip = os.path.join("submissions", f"{args.exp_id}_submission.zip")
-                build_championship_submission(raw_model, sub_zip, save_fp16=True)
-                print(f"[{args.exp_id}] Auto-built verified submission zip: {sub_zip} ({os.path.getsize(sub_zip)/(1024*1024):.2f} MB)", flush=True)
+                # Only package submission zip when score is competitive (>= 0.50) or final epoch
+                if best_madm >= 0.50 or epoch == total_epochs:
+                    sub_zip = os.path.join("submissions", f"{args.exp_id}_submission.zip")
+                    build_championship_submission(raw_model, sub_zip, save_fp16=True)
+                    print(f"[{args.exp_id}] Auto-built verified submission zip: {sub_zip} ({os.path.getsize(sub_zip)/(1024*1024):.2f} MB)", flush=True)
 
         if is_ddp:
             dist.barrier()
 
     if is_main_process:
         print("=" * 80, flush=True)
-        print(f"[{args.exp_id}] Championship Training Complete! Peak Val mADM: {best_madm:.6f}")
-        print("=" * 80)
+        print(f"[{args.exp_id}] Championship Training Complete! Peak Val mADM: {best_madm:.6f}", flush=True)
+        # Always build final verified submission zip from best model
+        best_path = os.path.join(args.save_dir, f"{args.exp_id}_best.pth")
+        if os.path.exists(best_path):
+            ckpt = torch.load(best_path, map_location="cpu")
+            raw_model.load_state_dict(ckpt["model_state_dict"])
+            sub_zip = os.path.join("submissions", f"{args.exp_id}_submission.zip")
+            build_championship_submission(raw_model, sub_zip, save_fp16=True)
+            print(f"[{args.exp_id}] Final Verified Championship Submission Zip Generated: {sub_zip} ({os.path.getsize(sub_zip)/(1024*1024):.2f} MB)", flush=True)
+        print("=" * 80, flush=True)
 
     if is_ddp:
         dist.destroy_process_group()
