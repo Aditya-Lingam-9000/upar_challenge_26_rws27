@@ -57,7 +57,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--backbone_lr_stage2", type=float, default=1.0e-6, help="Backbone learning rate in Stage 2 (0 = frozen)")
     parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
     parser.add_argument("--num_workers", type=int, default=2, help="DataLoader workers per GPU")
-    parser.add_argument("--eval_interval", type=int, default=5, help="Epochs between retrieval validation")
+    parser.add_argument("--eval_interval", type=int, default=1, help="Epochs between retrieval validation (default: 1 for every epoch)")
     parser.add_argument("--no_preload_ram", action="store_true", help="Disable RAM byte caching")
     parser.add_argument("--no_fp16", action="store_true", help="Disable mixed precision")
     return parser.parse_args()
@@ -98,6 +98,34 @@ def setup_device() -> tuple[torch.device, bool]:
         is_ddp = False
 
     return device, is_ddp
+
+
+def print_codabench_table(
+    epoch: int,
+    epochs: int,
+    metrics: dict[str, float],
+    exp_id: str = "EXP-007",
+    participant: str = "Jyothiradithya Lingam",
+    is_best: bool = False,
+) -> None:
+    """Print validation results formatted strictly matching the official Codabench competition leaderboard table."""
+    import datetime
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    print("\n" + "=" * 115, flush=True)
+    print("Results", flush=True)
+    print(f"Task:        Attribute-based Person Retrieval - validation set (Epoch {epoch:02d}/{epochs:02d})", flush=True)
+    print(f"{'#':<4} {'Participant':<26} {'Date':<18} {'ID':<10} {'mADM':<9} {'mAP':<9} {'Rank-1':<9} {'Rank-5':<9} {'Rank-10':<9} {'mINP':<9}", flush=True)
+    print("-" * 115, flush=True)
+    print(
+        f"{epoch:<4} {participant:<26} {now_str:<18} {exp_id:<10} "
+        f"{metrics['mADM']:<9.4f} {metrics['mAP']:<9.4f} "
+        f"{metrics['Rank-1']:<8.2f}% {metrics['Rank-5']:<8.2f}% {metrics['Rank-10']:<8.2f}% "
+        f"{metrics['mINP']:<9.4f}",
+        flush=True,
+    )
+    if is_best:
+        print(f"*** NEW BEST VALIDATION SCORE: mADM = {metrics['mADM']:.4f} ***", flush=True)
+    print("=" * 115 + "\n", flush=True)
 
 
 def main() -> None:
@@ -188,6 +216,7 @@ def main() -> None:
 
     raw_model = model.module if is_ddp else model
     best_madm = 0.0
+    history: list[dict[str, Any]] = []
     engine = PseudoDescriptionEngine()
 
     total_epochs = args.stage1_epochs + args.stage2_epochs
@@ -278,7 +307,7 @@ def main() -> None:
 
         # 3. Periodic Retrieval Evaluation on Rank 0
         if is_main_process and (epoch % args.eval_interval == 0 or epoch == total_epochs or epoch == args.stage1_epochs):
-            print(f"[{args.exp_id}] Running full retrieval evaluation in 1024-D metric space...", flush=True)
+            print(f"\n[{args.exp_id}] Running validation retrieval in continuous 1024-D metric space ({len(val_dataset.samples)} gallery images, {len(val_queries)} queries)...", flush=True)
             metrics = evaluate_crossmodal_retrieval(
                 model=raw_model,
                 val_loader=val_loader,
@@ -288,28 +317,52 @@ def main() -> None:
                 use_reranking=False,
                 engine=engine,
             )
-            print("=" * 80)
-            print(f"[{args.exp_id}] RETRIEVAL METRICS (Epoch {epoch:02d}):")
-            print(f"  -> PRIMARY mADM: {metrics['mADM']:.6f}")
-            print(f"  -> Identity mAP: {metrics['mAP']:.6f}")
-            print(f"  -> Rank-1 Hit:  {metrics['Rank-1']:.2f}% | Rank-5: {metrics['Rank-5']:.2f}% | Rank-10: {metrics['Rank-10']:.2f}%")
-            print(f"  -> mINP Penalty: {metrics['mINP']:.6f} | Eval Time: {metrics['eval_time']:.1f}s")
-            print("=" * 80)
+
+            is_best = metrics["mADM"] > best_madm
+
+            # Print results formatted strictly matching the official Codabench server table
+            print_codabench_table(
+                epoch=epoch,
+                epochs=total_epochs,
+                metrics=metrics,
+                exp_id=args.exp_id,
+                participant="Jyothiradithya Lingam",
+                is_best=is_best,
+            )
+
+            # Record in training history log
+            history_record = {
+                "epoch": epoch,
+                "stage": current_stage,
+                "train_loss": avg_loss,
+                "val_mADM": metrics["mADM"],
+                "val_mAP": metrics["mAP"],
+                "val_Rank-1": metrics["Rank-1"],
+                "val_Rank-5": metrics["Rank-5"],
+                "val_Rank-10": metrics["Rank-10"],
+                "val_mINP": metrics["mINP"],
+                "eval_time": metrics["eval_time"],
+                "lr": optimizer.param_groups[0]["lr"],
+            }
+            history.append(history_record)
+            history_path = os.path.join(args.save_dir, f"{args.exp_id}_history.json")
+            with open(history_path, "w", encoding="utf-8") as f:
+                json.dump(history, f, indent=2)
 
             # Checkpoint management
             ckpt_path = os.path.join(args.save_dir, f"{args.exp_id}_latest.pth")
             torch.save({"epoch": epoch, "model_state_dict": raw_model.state_dict(), "metrics": metrics}, ckpt_path)
 
-            if metrics["mADM"] > best_madm:
+            if is_best:
                 best_madm = metrics["mADM"]
                 best_path = os.path.join(args.save_dir, f"{args.exp_id}_best.pth")
                 torch.save({"epoch": epoch, "model_state_dict": raw_model.state_dict(), "metrics": metrics}, best_path)
-                print(f"[{args.exp_id}] *** NEW BEST VALIDATION mADM: {best_madm:.6f}! Saved: {best_path} ***", flush=True)
+                print(f"[{args.exp_id}] *** NEW BEST VALIDATION mADM: {best_madm:.6f}! Checkpoint Saved: {best_path} ***", flush=True)
 
                 # Auto-package championship submission zip
                 sub_zip = os.path.join("submissions", f"{args.exp_id}_submission.zip")
                 build_championship_submission(raw_model, sub_zip, save_fp16=True)
-                print(f"[{args.exp_id}] Auto-built verified submission zip: {sub_zip}", flush=True)
+                print(f"[{args.exp_id}] Auto-built verified submission zip: {sub_zip} ({os.path.getsize(sub_zip)/(1024*1024):.2f} MB)", flush=True)
 
         if is_ddp:
             dist.barrier()
