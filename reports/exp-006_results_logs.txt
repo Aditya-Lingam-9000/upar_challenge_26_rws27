@@ -1,0 +1,655 @@
+Config loaded successfully for EXP-006
+PyTorch Version: 2.11.0+cu128
+CUDA Available: True
+Detected GPUs: 2
+GPU 0: Tesla T4 | Total Memory: 14.56 GB
+GPU 1: Tesla T4 | Total Memory: 14.56 GB
+[DATASET] Final Resolved Path: /kaggle/input/datasets/hinewk/upar-challenge-2027-data/data
+[DATASET] Subdirectories: ['PETA', 'PA100k', 'annotations', 'Market1501']
+[DATASET] train.csv verified: True
+Cloning into '/kaggle/working/upar_challenge_26_rws27'...
+Cloning private repository from GitHub...
+Cloning into '/kaggle/working/upar_challenge_26_rws27'...
+
+Cloning into '/kaggle/working/upar_challenge_26_rws27'...
+Active Directory: /kaggle/working/upar_challenge_26_rws27
+[EXP-006] ==========================================================================
+[EXP-006] Starting RWS 2027 Production Training Run: EXP-006
+[EXP-006] Architecture: solider_swin_tiny | Input Resolution: 256x128
+[EXP-006] Device: cuda:0 | Detected CUDA GPUs: 2 | FP16: True
+[EXP-006] DistributedDataParallel (DDP) Activated: 2 processes (NCCL backend, zero PCIe weight broadcast)
+[EXP-006] Effective Global Batch Size: 448 | Epochs: 75
+[EXP-006] Surveillance Domain Augmentations: ENABLED (MEVID 75px ResolutionDrop + Motion Blur + Erasing)
+[EXP-006] ==========================================================================
+[RAM Cache] Preloading 97669 images into system RAM (16 concurrent I/O threads)...
+[RAM Cache] Preloading 97669 images into system RAM (16 concurrent I/O threads)...
+[RAM Cache] Preloaded 97669 images (473.0 MB) in 34.5s! All disk I/O eliminated.
+[RAM Cache] Preloaded 97669 images (473.0 MB) in 34.5s! All disk I/O eliminated.
+[EXP-006] Dataset Loaded: 97669 training images across Market1501, PA100k, PETA.
+[EXP-006] Batches per Epoch per Rank: 218 | DataLoader Workers: 2 (Prefetch: 2)
+Downloading: "https://download.pytorch.org/models/swin_t-704ceda3.pth" to /root/.cache/torch/hub/checkpoints/swin_t-704ceda3.pth
+Downloading: "https://download.pytorch.org/models/swin_t-704ceda3.pth" to /root/.cache/torch/hub/checkpoints/swin_t-704ceda3.pth
+
+  0%|                                                | 0.00/108M [00:00<?, ?B/s]
+  0%|                                                | 0.00/108M [00:00<?, ?B/s]
+  7%|██▋                                    | 7.62M/108M [00:00<00:01, 79.7MB/s]
+  8%|██▉                                    | 8.25M/108M [00:00<00:01, 85.9MB/s]
+ 24%|█████████▌                              | 25.9M/108M [00:00<00:00, 145MB/s]
+ 25%|██████████                              | 27.1M/108M [00:00<00:00, 151MB/s]
+ 40%|███████████████▉                        | 43.2M/108M [00:00<00:00, 161MB/s]
+ 41%|████████████████▌                       | 44.8M/108M [00:00<00:00, 167MB/s]
+ 55%|██████████████████████                  | 59.8M/108M [00:00<00:00, 166MB/s]
+ 58%|███████████████████████▎                | 63.0M/108M [00:00<00:00, 176MB/s]
+ 71%|████████████████████████████▎           | 76.6M/108M [00:00<00:00, 169MB/s]
+ 74%|█████████████████████████████▌          | 79.9M/108M [00:00<00:00, 173MB/s]
+ 88%|███████████████████████████████████▎    | 95.4M/108M [00:00<00:00, 179MB/s]
+ 89%|███████████████████████████████████▋    | 96.5M/108M [00:00<00:00, 173MB/s]
+100%|█████████████████████████████████████████| 108M/108M [00:00<00:00, 170MB/s]
+
+100%|█████████████████████████████████████████| 108M/108M [00:00<00:00, 169MB/s]
+[EXP-006] Beginning execution from Epoch 1 through 75...
+[2026-10-03 14:09:07] Epoch [01/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.5509 (ASL: 0.1035, Grp: 0.4474) | LR: 1.00e-04 | Speed: 331.2 img/s | ETA: [Epoch: 04m 21s | Total: 09h 15m 34s] | VRAM: 533MB / 14328MB
+[2026-10-03 14:09:37] Epoch [01/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.4389 (ASL: 0.0895, Grp: 0.3495) | LR: 1.00e-04 | Speed: 354.5 img/s | ETA: [Epoch: 03m 32s | Total: 08h 50m 47s] | VRAM: 533MB / 14328MB
+[EXP-006] Epoch 01/75 Complete | Train Loss: 0.3711 (ASL: 0.0788, Grp: 0.2922) | LR: 1.00e-04 | Duration: 04m 39s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+1    Jyothiradithya Lingam      2026-10-03 14:15   EXP-006    0.3777    0.0224    0.0251    0.0708    0.1063    0.0074   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 76.94%
+*** NEW BEST VALIDATION SCORE: mADM = 0.3777 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.377667 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+/usr/local/lib/python3.13/dist-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+return func(*args, **kwargs)
+[2026-10-03 14:16:13] Epoch [02/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.2618 (ASL: 0.0623, Grp: 0.1995) | LR: 1.00e-04 | Speed: 331.3 img/s | ETA: [Epoch: 04m 21s | Total: 08h 43m 40s] | VRAM: 533MB / 14076MB
+[2026-10-03 14:16:45] Epoch [02/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.2459 (ASL: 0.0597, Grp: 0.1862) | LR: 1.00e-04 | Speed: 339.6 img/s | ETA: [Epoch: 03m 41s | Total: 08h 43m 01s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 02/75 Complete | Train Loss: 0.2299 (ASL: 0.0574, Grp: 0.1725) | LR: 9.98e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+2    Jyothiradithya Lingam      2026-10-03 14:22   EXP-006    0.4372    0.0386    0.0471    0.1129    0.1519    0.0112   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 81.04%
+*** NEW BEST VALIDATION SCORE: mADM = 0.4372 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.437226 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 14:23:16] Epoch [03/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.2004 (ASL: 0.0535, Grp: 0.1469) | LR: 9.98e-05 | Speed: 331.6 img/s | ETA: [Epoch: 04m 20s | Total: 08h 33m 05s] | VRAM: 533MB / 14076MB
+[2026-10-03 14:23:48] Epoch [03/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.1695 (ASL: 0.0462, Grp: 0.1233) | LR: 9.98e-05 | Speed: 340.5 img/s | ETA: [Epoch: 03m 41s | Total: 08h 32m 25s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 03/75 Complete | Train Loss: 0.1942 (ASL: 0.0506, Grp: 0.1436) | LR: 9.96e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+3    Jyothiradithya Lingam      2026-10-03 14:29   EXP-006    0.4647    0.0506    0.0633    0.1254    0.1658    0.0168   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 82.01%
+*** NEW BEST VALIDATION SCORE: mADM = 0.4647 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.464684 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 14:30:17] Epoch [04/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.1719 (ASL: 0.0466, Grp: 0.1253) | LR: 9.96e-05 | Speed: 328.7 img/s | ETA: [Epoch: 04m 23s | Total: 08h 23m 57s] | VRAM: 533MB / 14076MB
+[2026-10-03 14:30:49] Epoch [04/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.1795 (ASL: 0.0474, Grp: 0.1321) | LR: 9.96e-05 | Speed: 340.2 img/s | ETA: [Epoch: 03m 41s | Total: 08h 23m 16s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 04/75 Complete | Train Loss: 0.1698 (ASL: 0.0459, Grp: 0.1239) | LR: 9.93e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+4    Jyothiradithya Lingam      2026-10-03 14:36   EXP-006    0.4856    0.0602    0.0705    0.1430    0.1860    0.0214   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 82.35%
+*** NEW BEST VALIDATION SCORE: mADM = 0.4856 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.485600 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 14:37:20] Epoch [05/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.1541 (ASL: 0.0434, Grp: 0.1107) | LR: 9.93e-05 | Speed: 328.7 img/s | ETA: [Epoch: 04m 23s | Total: 08h 18m 37s] | VRAM: 533MB / 14076MB
+[2026-10-03 14:37:52] Epoch [05/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.1402 (ASL: 0.0411, Grp: 0.0991) | LR: 9.93e-05 | Speed: 339.2 img/s | ETA: [Epoch: 03m 41s | Total: 08h 17m 56s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 05/75 Complete | Train Loss: 0.1510 (ASL: 0.0423, Grp: 0.1087) | LR: 9.89e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+5    Jyothiradithya Lingam      2026-10-03 14:43   EXP-006    0.4852    0.0619    0.0806    0.1459    0.1820    0.0227   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 82.75%
+
+[2026-10-03 14:44:23] Epoch [06/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.1385 (ASL: 0.0405, Grp: 0.0980) | LR: 9.89e-05 | Speed: 331.5 img/s | ETA: [Epoch: 04m 20s | Total: 08h 12m 20s] | VRAM: 533MB / 14076MB
+[2026-10-03 14:44:55] Epoch [06/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.1381 (ASL: 0.0390, Grp: 0.0991) | LR: 9.89e-05 | Speed: 340.1 img/s | ETA: [Epoch: 03m 41s | Total: 08h 11m 41s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 06/75 Complete | Train Loss: 0.1377 (ASL: 0.0396, Grp: 0.0981) | LR: 9.84e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+6    Jyothiradithya Lingam      2026-10-03 14:50   EXP-006    0.4868    0.0638    0.0803    0.1482    0.1866    0.0227   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.49%
+*** NEW BEST VALIDATION SCORE: mADM = 0.4868 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.486838 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 14:51:25] Epoch [07/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.1384 (ASL: 0.0399, Grp: 0.0985) | LR: 9.84e-05 | Speed: 331.7 img/s | ETA: [Epoch: 04m 20s | Total: 08h 03m 49s] | VRAM: 533MB / 14076MB
+[2026-10-03 14:51:57] Epoch [07/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.1180 (ASL: 0.0370, Grp: 0.0810) | LR: 9.84e-05 | Speed: 340.3 img/s | ETA: [Epoch: 03m 41s | Total: 08h 03m 09s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 07/75 Complete | Train Loss: 0.1263 (ASL: 0.0373, Grp: 0.0890) | LR: 9.79e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+7    Jyothiradithya Lingam      2026-10-03 14:57   EXP-006    0.4986    0.0702    0.0924    0.1635    0.2080    0.0262   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.15%
+*** NEW BEST VALIDATION SCORE: mADM = 0.4986 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.498627 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 14:58:27] Epoch [08/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.1222 (ASL: 0.0356, Grp: 0.0865) | LR: 9.79e-05 | Speed: 327.8 img/s | ETA: [Epoch: 04m 23s | Total: 07h 56m 47s] | VRAM: 533MB / 14076MB
+[2026-10-03 14:58:59] Epoch [08/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.1249 (ASL: 0.0358, Grp: 0.0891) | LR: 9.79e-05 | Speed: 339.4 img/s | ETA: [Epoch: 03m 41s | Total: 07h 56m 05s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 08/75 Complete | Train Loss: 0.1203 (ASL: 0.0358, Grp: 0.0846) | LR: 9.72e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+8    Jyothiradithya Lingam      2026-10-03 15:05   EXP-006    0.5004    0.0740    0.0930    0.1745    0.2117    0.0295   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.78%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5004 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.500403 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 15:05:36] Epoch [09/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.1133 (ASL: 0.0334, Grp: 0.0799) | LR: 9.72e-05 | Speed: 330.9 img/s | ETA: [Epoch: 04m 21s | Total: 07h 57m 59s] | VRAM: 533MB / 14076MB
+[2026-10-03 15:06:08] Epoch [09/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.1348 (ASL: 0.0384, Grp: 0.0964) | LR: 9.72e-05 | Speed: 340.0 img/s | ETA: [Epoch: 03m 41s | Total: 07h 57m 19s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 09/75 Complete | Train Loss: 0.1122 (ASL: 0.0341, Grp: 0.0782) | LR: 9.65e-05 | Duration: 04m 41s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+9    Jyothiradithya Lingam      2026-10-03 15:12   EXP-006    0.5173    0.0801    0.1040    0.1860    0.2296    0.0328   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.73%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5173 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.517265 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 15:12:37] Epoch [10/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.1205 (ASL: 0.0360, Grp: 0.0845) | LR: 9.65e-05 | Speed: 356.8 img/s | ETA: [Epoch: 04m 02s | Total: 07h 43m 38s] | VRAM: 533MB / 14076MB
+[2026-10-03 15:13:07] Epoch [10/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0994 (ASL: 0.0307, Grp: 0.0686) | LR: 9.65e-05 | Speed: 364.0 img/s | ETA: [Epoch: 03m 26s | Total: 07h 43m 03s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 10/75 Complete | Train Loss: 0.1063 (ASL: 0.0327, Grp: 0.0736) | LR: 9.57e-05 | Duration: 04m 34s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+10   Jyothiradithya Lingam      2026-10-03 15:19   EXP-006    0.5198    0.0848    0.1098    0.1857    0.2276    0.0356   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.28%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5198 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.519765 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 15:19:35] Epoch [11/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.1005 (ASL: 0.0331, Grp: 0.0675) | LR: 9.57e-05 | Speed: 326.2 img/s | ETA: [Epoch: 04m 25s | Total: 07h 29m 04s] | VRAM: 533MB / 14076MB
+[2026-10-03 15:20:07] Epoch [11/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.1150 (ASL: 0.0343, Grp: 0.0807) | LR: 9.57e-05 | Speed: 337.3 img/s | ETA: [Epoch: 03m 43s | Total: 07h 28m 22s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 11/75 Complete | Train Loss: 0.1016 (ASL: 0.0316, Grp: 0.0700) | LR: 9.48e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+11   Jyothiradithya Lingam      2026-10-03 15:26   EXP-006    0.5222    0.0865    0.1150    0.1982    0.2380    0.0370   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.67%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5222 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.522183 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 15:26:38] Epoch [12/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.1092 (ASL: 0.0337, Grp: 0.0755) | LR: 9.48e-05 | Speed: 326.7 img/s | ETA: [Epoch: 04m 24s | Total: 07h 29m 06s] | VRAM: 533MB / 14076MB
+[2026-10-03 15:27:10] Epoch [12/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0905 (ASL: 0.0296, Grp: 0.0609) | LR: 9.48e-05 | Speed: 337.1 img/s | ETA: [Epoch: 03m 43s | Total: 07h 28m 24s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 12/75 Complete | Train Loss: 0.0963 (ASL: 0.0304, Grp: 0.0660) | LR: 9.39e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+12   Jyothiradithya Lingam      2026-10-03 15:33   EXP-006    0.5264    0.0870    0.1106    0.1984    0.2447    0.0356   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.52%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5264 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.526434 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 15:33:46] Epoch [13/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0910 (ASL: 0.0296, Grp: 0.0614) | LR: 9.39e-05 | Speed: 332.0 img/s | ETA: [Epoch: 04m 20s | Total: 07h 28m 44s] | VRAM: 533MB / 14076MB
+[2026-10-03 15:34:18] Epoch [13/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.1008 (ASL: 0.0307, Grp: 0.0701) | LR: 9.39e-05 | Speed: 341.7 img/s | ETA: [Epoch: 03m 40s | Total: 07h 28m 04s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 13/75 Complete | Train Loss: 0.0936 (ASL: 0.0296, Grp: 0.0640) | LR: 9.28e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+13   Jyothiradithya Lingam      2026-10-03 15:40   EXP-006    0.5287    0.0894    0.1147    0.2019    0.2473    0.0370   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.92%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5287 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.528682 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 15:40:53] Epoch [14/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0836 (ASL: 0.0292, Grp: 0.0544) | LR: 9.28e-05 | Speed: 325.7 img/s | ETA: [Epoch: 04m 25s | Total: 07h 19m 16s] | VRAM: 533MB / 14076MB
+[2026-10-03 15:41:25] Epoch [14/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0893 (ASL: 0.0285, Grp: 0.0608) | LR: 9.28e-05 | Speed: 338.4 img/s | ETA: [Epoch: 03m 42s | Total: 07h 18m 33s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 14/75 Complete | Train Loss: 0.0907 (ASL: 0.0288, Grp: 0.0619) | LR: 9.17e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+14   Jyothiradithya Lingam      2026-10-03 15:47   EXP-006    0.5303    0.0913    0.1170    0.2016    0.2478    0.0391   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.29%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5303 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.530251 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 15:48:00] Epoch [15/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0885 (ASL: 0.0286, Grp: 0.0598) | LR: 9.17e-05 | Speed: 329.1 img/s | ETA: [Epoch: 04m 22s | Total: 07h 13m 11s] | VRAM: 533MB / 14076MB
+[2026-10-03 15:48:32] Epoch [15/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.1044 (ASL: 0.0318, Grp: 0.0726) | LR: 9.17e-05 | Speed: 339.0 img/s | ETA: [Epoch: 03m 42s | Total: 07h 12m 30s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 15/75 Complete | Train Loss: 0.0871 (ASL: 0.0279, Grp: 0.0592) | LR: 9.05e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+15   Jyothiradithya Lingam      2026-10-03 15:54   EXP-006    0.5344    0.0956    0.1291    0.2083    0.2553    0.0421   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.37%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5344 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.534378 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 15:55:06] Epoch [16/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0805 (ASL: 0.0269, Grp: 0.0536) | LR: 9.05e-05 | Speed: 328.0 img/s | ETA: [Epoch: 04m 23s | Total: 07h 04m 52s] | VRAM: 533MB / 14076MB
+[2026-10-03 15:55:38] Epoch [16/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0860 (ASL: 0.0271, Grp: 0.0589) | LR: 9.05e-05 | Speed: 338.8 img/s | ETA: [Epoch: 03m 42s | Total: 07h 04m 10s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 16/75 Complete | Train Loss: 0.0848 (ASL: 0.0273, Grp: 0.0575) | LR: 8.93e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+16   Jyothiradithya Lingam      2026-10-03 16:01   EXP-006    0.5397    0.0979    0.1280    0.2149    0.2582    0.0427   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.41%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5397 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.539730 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 16:02:12] Epoch [17/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0865 (ASL: 0.0270, Grp: 0.0595) | LR: 8.93e-05 | Speed: 329.9 img/s | ETA: [Epoch: 04m 22s | Total: 06h 57m 36s] | VRAM: 533MB / 14076MB
+[2026-10-03 16:02:44] Epoch [17/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0903 (ASL: 0.0276, Grp: 0.0627) | LR: 8.93e-05 | Speed: 339.4 img/s | ETA: [Epoch: 03m 41s | Total: 06h 56m 56s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 17/75 Complete | Train Loss: 0.0819 (ASL: 0.0266, Grp: 0.0553) | LR: 8.80e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+17   Jyothiradithya Lingam      2026-10-03 16:08   EXP-006    0.5454    0.1019    0.1320    0.2227    0.2718    0.0454   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.59%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5454 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.545392 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 16:09:24] Epoch [18/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0856 (ASL: 0.0281, Grp: 0.0575) | LR: 8.80e-05 | Speed: 326.9 img/s | ETA: [Epoch: 04m 24s | Total: 06h 55m 35s] | VRAM: 533MB / 14076MB
+[2026-10-03 16:09:56] Epoch [18/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.1016 (ASL: 0.0295, Grp: 0.0720) | LR: 8.80e-05 | Speed: 338.1 img/s | ETA: [Epoch: 03m 42s | Total: 06h 54m 53s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 18/75 Complete | Train Loss: 0.0797 (ASL: 0.0259, Grp: 0.0537) | LR: 8.66e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+18   Jyothiradithya Lingam      2026-10-03 16:15   EXP-006    0.5401    0.0973    0.1251    0.2198    0.2594    0.0414   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.41%
+
+[2026-10-03 16:16:31] Epoch [19/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0796 (ASL: 0.0261, Grp: 0.0535) | LR: 8.66e-05 | Speed: 328.3 img/s | ETA: [Epoch: 04m 23s | Total: 06h 45m 36s] | VRAM: 533MB / 14076MB
+[2026-10-03 16:17:03] Epoch [19/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0744 (ASL: 0.0252, Grp: 0.0491) | LR: 8.66e-05 | Speed: 339.4 img/s | ETA: [Epoch: 03m 41s | Total: 06h 44m 54s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 19/75 Complete | Train Loss: 0.0775 (ASL: 0.0253, Grp: 0.0522) | LR: 8.51e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+19   Jyothiradithya Lingam      2026-10-03 16:23   EXP-006    0.5535    0.1051    0.1378    0.2256    0.2730    0.0468   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.84%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5535 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.553486 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 16:23:41] Epoch [20/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0728 (ASL: 0.0241, Grp: 0.0487) | LR: 8.51e-05 | Speed: 325.4 img/s | ETA: [Epoch: 04m 25s | Total: 06h 39m 51s] | VRAM: 533MB / 14076MB
+[2026-10-03 16:24:13] Epoch [20/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0764 (ASL: 0.0245, Grp: 0.0518) | LR: 8.51e-05 | Speed: 337.3 img/s | ETA: [Epoch: 03m 43s | Total: 06h 39m 08s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 20/75 Complete | Train Loss: 0.0762 (ASL: 0.0249, Grp: 0.0513) | LR: 8.36e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+20   Jyothiradithya Lingam      2026-10-03 16:30   EXP-006    0.5501    0.1035    0.1352    0.2221    0.2718    0.0458   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.62%
+
+[2026-10-03 16:30:48] Epoch [21/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0659 (ASL: 0.0232, Grp: 0.0427) | LR: 8.36e-05 | Speed: 327.2 img/s | ETA: [Epoch: 04m 24s | Total: 06h 30m 38s] | VRAM: 533MB / 14076MB
+[2026-10-03 16:31:20] Epoch [21/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0850 (ASL: 0.0258, Grp: 0.0592) | LR: 8.36e-05 | Speed: 339.0 img/s | ETA: [Epoch: 03m 42s | Total: 06h 29m 56s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 21/75 Complete | Train Loss: 0.0731 (ASL: 0.0243, Grp: 0.0488) | LR: 8.21e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+21   Jyothiradithya Lingam      2026-10-03 16:37   EXP-006    0.5523    0.1056    0.1375    0.2314    0.2764    0.0466   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.18%
+
+[2026-10-03 16:37:55] Epoch [22/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0592 (ASL: 0.0211, Grp: 0.0381) | LR: 8.21e-05 | Speed: 326.9 img/s | ETA: [Epoch: 04m 24s | Total: 06h 22m 51s] | VRAM: 533MB / 14076MB
+[2026-10-03 16:38:27] Epoch [22/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0628 (ASL: 0.0232, Grp: 0.0395) | LR: 8.21e-05 | Speed: 338.7 img/s | ETA: [Epoch: 03m 42s | Total: 06h 22m 08s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 22/75 Complete | Train Loss: 0.0709 (ASL: 0.0237, Grp: 0.0472) | LR: 8.04e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+22   Jyothiradithya Lingam      2026-10-03 16:44   EXP-006    0.5499    0.1019    0.1343    0.2299    0.2776    0.0434   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.96%
+
+[2026-10-03 16:45:03] Epoch [23/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0641 (ASL: 0.0223, Grp: 0.0418) | LR: 8.04e-05 | Speed: 327.0 img/s | ETA: [Epoch: 04m 24s | Total: 06h 17m 32s] | VRAM: 533MB / 14076MB
+[2026-10-03 16:45:35] Epoch [23/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0915 (ASL: 0.0289, Grp: 0.0626) | LR: 8.04e-05 | Speed: 338.3 img/s | ETA: [Epoch: 03m 42s | Total: 06h 16m 51s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 23/75 Complete | Train Loss: 0.0693 (ASL: 0.0234, Grp: 0.0459) | LR: 7.88e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+23   Jyothiradithya Lingam      2026-10-03 16:51   EXP-006    0.5531    0.1053    0.1337    0.2314    0.2790    0.0464   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.47%
+
+[2026-10-03 16:52:13] Epoch [24/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0851 (ASL: 0.0266, Grp: 0.0584) | LR: 7.88e-05 | Speed: 330.2 img/s | ETA: [Epoch: 04m 21s | Total: 06h 12m 18s] | VRAM: 533MB / 14076MB
+[2026-10-03 16:52:45] Epoch [24/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0716 (ASL: 0.0221, Grp: 0.0496) | LR: 7.88e-05 | Speed: 339.3 img/s | ETA: [Epoch: 03m 41s | Total: 06h 11m 38s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 24/75 Complete | Train Loss: 0.0674 (ASL: 0.0228, Grp: 0.0446) | LR: 7.70e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+24   Jyothiradithya Lingam      2026-10-03 16:58   EXP-006    0.5560    0.1070    0.1404    0.2322    0.2816    0.0472   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.44%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5560 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.555992 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 16:59:23] Epoch [25/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0616 (ASL: 0.0202, Grp: 0.0413) | LR: 7.70e-05 | Speed: 327.1 img/s | ETA: [Epoch: 04m 24s | Total: 06h 03m 59s] | VRAM: 533MB / 14076MB
+[2026-10-03 16:59:55] Epoch [25/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0594 (ASL: 0.0208, Grp: 0.0386) | LR: 7.70e-05 | Speed: 339.1 img/s | ETA: [Epoch: 03m 41s | Total: 06h 03m 17s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 25/75 Complete | Train Loss: 0.0657 (ASL: 0.0224, Grp: 0.0433) | LR: 7.53e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+25   Jyothiradithya Lingam      2026-10-03 17:05   EXP-006    0.5569    0.1078    0.1415    0.2340    0.2822    0.0468   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.38%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5569 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.556930 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 17:06:30] Epoch [26/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0672 (ASL: 0.0228, Grp: 0.0444) | LR: 7.53e-05 | Speed: 328.7 img/s | ETA: [Epoch: 04m 23s | Total: 05h 54m 55s] | VRAM: 533MB / 14076MB
+[2026-10-03 17:07:02] Epoch [26/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0505 (ASL: 0.0208, Grp: 0.0298) | LR: 7.53e-05 | Speed: 339.5 img/s | ETA: [Epoch: 03m 41s | Total: 05h 54m 14s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 26/75 Complete | Train Loss: 0.0642 (ASL: 0.0219, Grp: 0.0424) | LR: 7.34e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+26   Jyothiradithya Lingam      2026-10-03 17:13   EXP-006    0.5599    0.1088    0.1421    0.2366    0.2863    0.0476   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.52%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5599 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.559865 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 17:13:46] Epoch [27/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0641 (ASL: 0.0224, Grp: 0.0416) | LR: 7.34e-05 | Speed: 330.5 img/s | ETA: [Epoch: 04m 21s | Total: 05h 54m 45s] | VRAM: 533MB / 14076MB
+[2026-10-03 17:14:18] Epoch [27/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0608 (ASL: 0.0217, Grp: 0.0391) | LR: 7.34e-05 | Speed: 338.8 img/s | ETA: [Epoch: 03m 42s | Total: 05h 54m 06s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 27/75 Complete | Train Loss: 0.0626 (ASL: 0.0216, Grp: 0.0410) | LR: 7.16e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+27   Jyothiradithya Lingam      2026-10-03 17:20   EXP-006    0.5612    0.1101    0.1427    0.2412    0.2883    0.0478   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.62%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5612 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.561199 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 17:21:03] Epoch [28/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0548 (ASL: 0.0204, Grp: 0.0344) | LR: 7.16e-05 | Speed: 330.8 img/s | ETA: [Epoch: 04m 21s | Total: 05h 48m 19s] | VRAM: 533MB / 14076MB
+[2026-10-03 17:21:35] Epoch [28/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0617 (ASL: 0.0203, Grp: 0.0413) | LR: 7.16e-05 | Speed: 339.8 img/s | ETA: [Epoch: 03m 41s | Total: 05h 47m 39s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 28/75 Complete | Train Loss: 0.0614 (ASL: 0.0211, Grp: 0.0403) | LR: 6.97e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+28   Jyothiradithya Lingam      2026-10-03 17:27   EXP-006    0.5642    0.1137    0.1499    0.2455    0.2952    0.0498   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.63%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5642 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.564237 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 17:28:18] Epoch [29/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0586 (ASL: 0.0191, Grp: 0.0395) | LR: 6.97e-05 | Speed: 329.0 img/s | ETA: [Epoch: 04m 22s | Total: 05h 39m 31s] | VRAM: 533MB / 14076MB
+[2026-10-03 17:28:50] Epoch [29/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0665 (ASL: 0.0215, Grp: 0.0450) | LR: 6.97e-05 | Speed: 338.6 img/s | ETA: [Epoch: 03m 42s | Total: 05h 38m 51s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 29/75 Complete | Train Loss: 0.0592 (ASL: 0.0208, Grp: 0.0384) | LR: 6.78e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+29   Jyothiradithya Lingam      2026-10-03 17:34   EXP-006    0.5585    0.1104    0.1479    0.2409    0.2886    0.0477   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.62%
+
+[2026-10-03 17:35:33] Epoch [30/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0532 (ASL: 0.0187, Grp: 0.0345) | LR: 6.78e-05 | Speed: 326.9 img/s | ETA: [Epoch: 04m 24s | Total: 05h 32m 51s] | VRAM: 533MB / 14076MB
+[2026-10-03 17:36:05] Epoch [30/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0542 (ASL: 0.0199, Grp: 0.0342) | LR: 6.78e-05 | Speed: 337.9 img/s | ETA: [Epoch: 03m 42s | Total: 05h 32m 09s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 30/75 Complete | Train Loss: 0.0573 (ASL: 0.0202, Grp: 0.0370) | LR: 6.58e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+30   Jyothiradithya Lingam      2026-10-03 17:42   EXP-006    0.5597    0.1128    0.1462    0.2449    0.2946    0.0503   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.62%
+
+[2026-10-03 17:42:48] Epoch [31/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0564 (ASL: 0.0203, Grp: 0.0361) | LR: 6.58e-05 | Speed: 325.8 img/s | ETA: [Epoch: 04m 25s | Total: 05h 25m 01s] | VRAM: 533MB / 14076MB
+[2026-10-03 17:43:20] Epoch [31/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0486 (ASL: 0.0201, Grp: 0.0285) | LR: 6.58e-05 | Speed: 337.4 img/s | ETA: [Epoch: 03m 43s | Total: 05h 24m 19s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 31/75 Complete | Train Loss: 0.0569 (ASL: 0.0200, Grp: 0.0369) | LR: 6.38e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+31   Jyothiradithya Lingam      2026-10-03 17:49   EXP-006    0.5649    0.1152    0.1514    0.2493    0.2932    0.0516   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.36%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5649 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.564945 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 17:50:02] Epoch [32/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0556 (ASL: 0.0204, Grp: 0.0352) | LR: 6.38e-05 | Speed: 326.0 img/s | ETA: [Epoch: 04m 25s | Total: 05h 17m 43s] | VRAM: 533MB / 14076MB
+[2026-10-03 17:50:34] Epoch [32/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0601 (ASL: 0.0212, Grp: 0.0389) | LR: 6.38e-05 | Speed: 338.5 img/s | ETA: [Epoch: 03m 42s | Total: 05h 17m 00s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 32/75 Complete | Train Loss: 0.0549 (ASL: 0.0196, Grp: 0.0353) | LR: 6.18e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+32   Jyothiradithya Lingam      2026-10-03 17:56   EXP-006    0.5674    0.1178    0.1583    0.2507    0.2995    0.0536   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.20%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5674 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.567423 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 17:57:14] Epoch [33/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0499 (ASL: 0.0174, Grp: 0.0325) | LR: 6.18e-05 | Speed: 326.8 img/s | ETA: [Epoch: 04m 24s | Total: 05h 08m 27s] | VRAM: 533MB / 14076MB
+[2026-10-03 17:57:46] Epoch [33/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0500 (ASL: 0.0188, Grp: 0.0312) | LR: 6.18e-05 | Speed: 337.8 img/s | ETA: [Epoch: 03m 42s | Total: 05h 07m 45s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 33/75 Complete | Train Loss: 0.0546 (ASL: 0.0195, Grp: 0.0351) | LR: 5.98e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+33   Jyothiradithya Lingam      2026-10-03 18:03   EXP-006    0.5660    0.1178    0.1557    0.2516    0.3073    0.0532   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.44%
+
+[2026-10-03 18:04:28] Epoch [34/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0468 (ASL: 0.0185, Grp: 0.0283) | LR: 5.98e-05 | Speed: 325.4 img/s | ETA: [Epoch: 04m 25s | Total: 05h 02m 38s] | VRAM: 533MB / 14076MB
+[2026-10-03 18:05:00] Epoch [34/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0513 (ASL: 0.0181, Grp: 0.0332) | LR: 5.98e-05 | Speed: 337.1 img/s | ETA: [Epoch: 03m 43s | Total: 05h 01m 55s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 34/75 Complete | Train Loss: 0.0532 (ASL: 0.0191, Grp: 0.0341) | LR: 5.77e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+34   Jyothiradithya Lingam      2026-10-03 18:11   EXP-006    0.5701    0.1200    0.1557    0.2655    0.3099    0.0549   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.41%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5701 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.570062 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 18:11:37] Epoch [35/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0499 (ASL: 0.0174, Grp: 0.0324) | LR: 5.77e-05 | Speed: 326.6 img/s | ETA: [Epoch: 04m 24s | Total: 04h 52m 22s] | VRAM: 533MB / 14076MB
+[2026-10-03 18:12:09] Epoch [35/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0435 (ASL: 0.0169, Grp: 0.0266) | LR: 5.77e-05 | Speed: 339.0 img/s | ETA: [Epoch: 03m 42s | Total: 04h 51m 40s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 35/75 Complete | Train Loss: 0.0515 (ASL: 0.0187, Grp: 0.0328) | LR: 5.57e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+35   Jyothiradithya Lingam      2026-10-03 18:18   EXP-006    0.5716    0.1215    0.1589    0.2614    0.3111    0.0556   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.41%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5716 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.571628 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 18:18:46] Epoch [36/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0572 (ASL: 0.0194, Grp: 0.0378) | LR: 5.57e-05 | Speed: 326.9 img/s | ETA: [Epoch: 04m 24s | Total: 04h 45m 21s] | VRAM: 533MB / 14076MB
+[2026-10-03 18:19:18] Epoch [36/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0443 (ASL: 0.0169, Grp: 0.0274) | LR: 5.57e-05 | Speed: 338.4 img/s | ETA: [Epoch: 03m 42s | Total: 04h 44m 39s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 36/75 Complete | Train Loss: 0.0507 (ASL: 0.0185, Grp: 0.0322) | LR: 5.36e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+36   Jyothiradithya Lingam      2026-10-03 18:25   EXP-006    0.5716    0.1214    0.1603    0.2646    0.3128    0.0541   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.31%
+
+[2026-10-03 18:26:00] Epoch [37/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0442 (ASL: 0.0170, Grp: 0.0272) | LR: 5.36e-05 | Speed: 327.3 img/s | ETA: [Epoch: 04m 24s | Total: 04h 40m 53s] | VRAM: 533MB / 14076MB
+[2026-10-03 18:26:32] Epoch [37/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0423 (ASL: 0.0164, Grp: 0.0259) | LR: 5.36e-05 | Speed: 338.5 img/s | ETA: [Epoch: 03m 42s | Total: 04h 40m 12s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 37/75 Complete | Train Loss: 0.0491 (ASL: 0.0181, Grp: 0.0311) | LR: 5.15e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+37   Jyothiradithya Lingam      2026-10-03 18:32   EXP-006    0.5703    0.1213    0.1641    0.2614    0.3183    0.0539   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.33%
+
+[2026-10-03 18:33:06] Epoch [38/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0466 (ASL: 0.0179, Grp: 0.0287) | LR: 5.15e-05 | Speed: 330.6 img/s | ETA: [Epoch: 04m 21s | Total: 04h 29m 21s] | VRAM: 533MB / 14076MB
+[2026-10-03 18:33:38] Epoch [38/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0382 (ASL: 0.0153, Grp: 0.0229) | LR: 5.15e-05 | Speed: 339.6 img/s | ETA: [Epoch: 03m 41s | Total: 04h 28m 41s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 38/75 Complete | Train Loss: 0.0483 (ASL: 0.0178, Grp: 0.0305) | LR: 4.95e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+38   Jyothiradithya Lingam      2026-10-03 18:39   EXP-006    0.5715    0.1227    0.1690    0.2643    0.3102    0.0548   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.40%
+
+[2026-10-03 18:40:12] Epoch [39/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0602 (ASL: 0.0199, Grp: 0.0403) | LR: 4.95e-05 | Speed: 331.1 img/s | ETA: [Epoch: 04m 21s | Total: 04h 22m 09s] | VRAM: 533MB / 14076MB
+[2026-10-03 18:40:44] Epoch [39/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0452 (ASL: 0.0169, Grp: 0.0282) | LR: 4.95e-05 | Speed: 340.2 img/s | ETA: [Epoch: 03m 41s | Total: 04h 21m 29s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 39/75 Complete | Train Loss: 0.0473 (ASL: 0.0176, Grp: 0.0297) | LR: 4.74e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+39   Jyothiradithya Lingam      2026-10-03 18:46   EXP-006    0.5737    0.1230    0.1618    0.2698    0.3169    0.0552   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.34%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5737 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.573685 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 18:47:23] Epoch [40/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0375 (ASL: 0.0155, Grp: 0.0220) | LR: 4.74e-05 | Speed: 331.4 img/s | ETA: [Epoch: 04m 20s | Total: 04h 18m 00s] | VRAM: 533MB / 14076MB
+[2026-10-03 18:47:56] Epoch [40/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0462 (ASL: 0.0187, Grp: 0.0275) | LR: 4.74e-05 | Speed: 339.8 img/s | ETA: [Epoch: 03m 41s | Total: 04h 17m 21s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 40/75 Complete | Train Loss: 0.0466 (ASL: 0.0174, Grp: 0.0293) | LR: 4.53e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+40   Jyothiradithya Lingam      2026-10-03 18:53   EXP-006    0.5740    0.1259    0.1681    0.2686    0.3221    0.0572   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.38%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5740 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.574041 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 18:54:33] Epoch [41/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0368 (ASL: 0.0156, Grp: 0.0211) | LR: 4.53e-05 | Speed: 327.3 img/s | ETA: [Epoch: 04m 24s | Total: 04h 09m 32s] | VRAM: 533MB / 14076MB
+[2026-10-03 18:55:05] Epoch [41/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0558 (ASL: 0.0188, Grp: 0.0370) | LR: 4.53e-05 | Speed: 338.3 img/s | ETA: [Epoch: 03m 42s | Total: 04h 08m 50s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 41/75 Complete | Train Loss: 0.0457 (ASL: 0.0171, Grp: 0.0286) | LR: 4.33e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+41   Jyothiradithya Lingam      2026-10-03 19:01   EXP-006    0.5753    0.1257    0.1727    0.2756    0.3229    0.0562   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.38%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5753 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.575313 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 19:01:41] Epoch [42/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0442 (ASL: 0.0166, Grp: 0.0275) | LR: 4.33e-05 | Speed: 330.6 img/s | ETA: [Epoch: 04m 21s | Total: 04h 01m 57s] | VRAM: 533MB / 14076MB
+[2026-10-03 19:02:14] Epoch [42/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0439 (ASL: 0.0184, Grp: 0.0255) | LR: 4.33e-05 | Speed: 338.8 img/s | ETA: [Epoch: 03m 42s | Total: 04h 01m 18s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 42/75 Complete | Train Loss: 0.0444 (ASL: 0.0168, Grp: 0.0277) | LR: 4.12e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+42   Jyothiradithya Lingam      2026-10-03 19:08   EXP-006    0.5765    0.1252    0.1658    0.2712    0.3212    0.0561   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.36%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5765 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.576496 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 19:08:52] Epoch [43/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0362 (ASL: 0.0157, Grp: 0.0205) | LR: 4.12e-05 | Speed: 327.0 img/s | ETA: [Epoch: 04m 24s | Total: 03h 55m 49s] | VRAM: 533MB / 14076MB
+[2026-10-03 19:09:24] Epoch [43/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0444 (ASL: 0.0164, Grp: 0.0280) | LR: 4.12e-05 | Speed: 338.0 img/s | ETA: [Epoch: 03m 42s | Total: 03h 55m 07s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 43/75 Complete | Train Loss: 0.0434 (ASL: 0.0165, Grp: 0.0269) | LR: 3.92e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+43   Jyothiradithya Lingam      2026-10-03 19:15   EXP-006    0.5776    0.1270    0.1684    0.2727    0.3218    0.0573   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.17%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5776 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.577596 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 19:16:08] Epoch [44/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0377 (ASL: 0.0170, Grp: 0.0207) | LR: 3.92e-05 | Speed: 327.0 img/s | ETA: [Epoch: 04m 24s | Total: 03h 51m 25s] | VRAM: 533MB / 14076MB
+[2026-10-03 19:16:40] Epoch [44/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0437 (ASL: 0.0172, Grp: 0.0265) | LR: 3.92e-05 | Speed: 337.4 img/s | ETA: [Epoch: 03m 43s | Total: 03h 50m 44s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 44/75 Complete | Train Loss: 0.0429 (ASL: 0.0164, Grp: 0.0264) | LR: 3.72e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+44   Jyothiradithya Lingam      2026-10-03 19:22   EXP-006    0.5770    0.1258    0.1652    0.2767    0.3290    0.0561   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.07%
+
+[2026-10-03 19:23:19] Epoch [45/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0391 (ASL: 0.0158, Grp: 0.0233) | LR: 3.72e-05 | Speed: 326.8 img/s | ETA: [Epoch: 04m 24s | Total: 03h 42m 24s] | VRAM: 533MB / 14076MB
+[2026-10-03 19:23:52] Epoch [45/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0320 (ASL: 0.0143, Grp: 0.0177) | LR: 3.72e-05 | Speed: 336.7 img/s | ETA: [Epoch: 03m 43s | Total: 03h 41m 43s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 45/75 Complete | Train Loss: 0.0421 (ASL: 0.0162, Grp: 0.0259) | LR: 3.52e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+45   Jyothiradithya Lingam      2026-10-03 19:29   EXP-006    0.5776    0.1286    0.1722    0.2770    0.3281    0.0585   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.60%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5776 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.577608 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 19:30:27] Epoch [46/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0458 (ASL: 0.0173, Grp: 0.0286) | LR: 3.52e-05 | Speed: 330.9 img/s | ETA: [Epoch: 04m 21s | Total: 03h 33m 18s] | VRAM: 533MB / 14076MB
+[2026-10-03 19:31:00] Epoch [46/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0347 (ASL: 0.0151, Grp: 0.0196) | LR: 3.52e-05 | Speed: 337.9 img/s | ETA: [Epoch: 03m 42s | Total: 03h 32m 40s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 46/75 Complete | Train Loss: 0.0411 (ASL: 0.0160, Grp: 0.0252) | LR: 3.32e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+46   Jyothiradithya Lingam      2026-10-03 19:37   EXP-006    0.5813    0.1310    0.1748    0.2837    0.3345    0.0602   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.14%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5813 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.581316 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 19:37:35] Epoch [47/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0436 (ASL: 0.0174, Grp: 0.0262) | LR: 3.32e-05 | Speed: 331.1 img/s | ETA: [Epoch: 04m 21s | Total: 03h 25m 59s] | VRAM: 533MB / 14076MB
+[2026-10-03 19:38:07] Epoch [47/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0560 (ASL: 0.0185, Grp: 0.0375) | LR: 3.32e-05 | Speed: 338.2 img/s | ETA: [Epoch: 03m 42s | Total: 03h 25m 20s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 47/75 Complete | Train Loss: 0.0404 (ASL: 0.0158, Grp: 0.0247) | LR: 3.13e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+47   Jyothiradithya Lingam      2026-10-03 19:44   EXP-006    0.5756    0.1275    0.1675    0.2796    0.3296    0.0573   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.36%
+
+[2026-10-03 19:44:41] Epoch [48/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0396 (ASL: 0.0161, Grp: 0.0235) | LR: 3.13e-05 | Speed: 327.7 img/s | ETA: [Epoch: 04m 23s | Total: 03h 18m 10s] | VRAM: 533MB / 14076MB
+[2026-10-03 19:45:13] Epoch [48/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0417 (ASL: 0.0157, Grp: 0.0260) | LR: 3.13e-05 | Speed: 337.6 img/s | ETA: [Epoch: 03m 42s | Total: 03h 17m 29s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 48/75 Complete | Train Loss: 0.0400 (ASL: 0.0157, Grp: 0.0243) | LR: 2.94e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+48   Jyothiradithya Lingam      2026-10-03 19:51   EXP-006    0.5778    0.1288    0.1733    0.2779    0.3287    0.0584   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.29%
+
+[2026-10-03 19:51:48] Epoch [49/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0309 (ASL: 0.0140, Grp: 0.0169) | LR: 2.94e-05 | Speed: 330.4 img/s | ETA: [Epoch: 04m 21s | Total: 03h 11m 47s] | VRAM: 533MB / 14076MB
+[2026-10-03 19:52:21] Epoch [49/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0488 (ASL: 0.0187, Grp: 0.0301) | LR: 2.94e-05 | Speed: 337.3 img/s | ETA: [Epoch: 03m 43s | Total: 03h 11m 08s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 49/75 Complete | Train Loss: 0.0400 (ASL: 0.0156, Grp: 0.0243) | LR: 2.76e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+49   Jyothiradithya Lingam      2026-10-03 19:58   EXP-006    0.5805    0.1304    0.1736    0.2822    0.3307    0.0583   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.25%
+
+[2026-10-03 19:58:57] Epoch [50/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0413 (ASL: 0.0171, Grp: 0.0241) | LR: 2.76e-05 | Speed: 330.7 img/s | ETA: [Epoch: 04m 21s | Total: 03h 04m 53s] | VRAM: 533MB / 14076MB
+[2026-10-03 19:59:29] Epoch [50/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0333 (ASL: 0.0137, Grp: 0.0196) | LR: 2.76e-05 | Speed: 338.2 img/s | ETA: [Epoch: 03m 42s | Total: 03h 04m 14s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 50/75 Complete | Train Loss: 0.0394 (ASL: 0.0154, Grp: 0.0240) | LR: 2.57e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+50   Jyothiradithya Lingam      2026-10-03 20:05   EXP-006    0.5818    0.1308    0.1774    0.2854    0.3284    0.0592   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.21%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5818 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.581768 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 20:06:06] Epoch [51/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0352 (ASL: 0.0143, Grp: 0.0210) | LR: 2.57e-05 | Speed: 329.8 img/s | ETA: [Epoch: 04m 22s | Total: 02h 58m 16s] | VRAM: 533MB / 14076MB
+[2026-10-03 20:06:39] Epoch [51/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0322 (ASL: 0.0140, Grp: 0.0182) | LR: 2.57e-05 | Speed: 337.6 img/s | ETA: [Epoch: 03m 42s | Total: 02h 57m 37s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 51/75 Complete | Train Loss: 0.0382 (ASL: 0.0152, Grp: 0.0230) | LR: 2.40e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+51   Jyothiradithya Lingam      2026-10-03 20:12   EXP-006    0.5788    0.1295    0.1719    0.2825    0.3255    0.0589   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.45%
+
+[2026-10-03 20:13:18] Epoch [52/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0368 (ASL: 0.0144, Grp: 0.0224) | LR: 2.40e-05 | Speed: 327.9 img/s | ETA: [Epoch: 04m 23s | Total: 02h 52m 09s] | VRAM: 533MB / 14076MB
+[2026-10-03 20:13:50] Epoch [52/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0359 (ASL: 0.0151, Grp: 0.0208) | LR: 2.40e-05 | Speed: 338.0 img/s | ETA: [Epoch: 03m 42s | Total: 02h 51m 28s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 52/75 Complete | Train Loss: 0.0379 (ASL: 0.0151, Grp: 0.0228) | LR: 2.22e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+52   Jyothiradithya Lingam      2026-10-03 20:19   EXP-006    0.5821    0.1314    0.1707    0.2854    0.3325    0.0598   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.14%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5821 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.582053 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 20:20:28] Epoch [53/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0423 (ASL: 0.0151, Grp: 0.0272) | LR: 2.22e-05 | Speed: 327.8 img/s | ETA: [Epoch: 04m 23s | Total: 02h 43m 54s] | VRAM: 533MB / 14076MB
+[2026-10-03 20:21:00] Epoch [53/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0314 (ASL: 0.0146, Grp: 0.0168) | LR: 2.22e-05 | Speed: 337.8 img/s | ETA: [Epoch: 03m 42s | Total: 02h 43m 13s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 53/75 Complete | Train Loss: 0.0364 (ASL: 0.0148, Grp: 0.0216) | LR: 2.06e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+53   Jyothiradithya Lingam      2026-10-03 20:27   EXP-006    0.5793    0.1294    0.1748    0.2790    0.3252    0.0579   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.28%
+
+[2026-10-03 20:27:39] Epoch [54/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0305 (ASL: 0.0142, Grp: 0.0162) | LR: 2.06e-05 | Speed: 327.1 img/s | ETA: [Epoch: 04m 24s | Total: 02h 37m 42s] | VRAM: 533MB / 14076MB
+[2026-10-03 20:28:11] Epoch [54/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0357 (ASL: 0.0143, Grp: 0.0214) | LR: 2.06e-05 | Speed: 337.1 img/s | ETA: [Epoch: 03m 43s | Total: 02h 37m 01s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 54/75 Complete | Train Loss: 0.0365 (ASL: 0.0146, Grp: 0.0219) | LR: 1.89e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+54   Jyothiradithya Lingam      2026-10-03 20:34   EXP-006    0.5791    0.1298    0.1750    0.2811    0.3252    0.0593   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.32%
+
+[2026-10-03 20:34:48] Epoch [55/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0389 (ASL: 0.0147, Grp: 0.0242) | LR: 1.89e-05 | Speed: 327.0 img/s | ETA: [Epoch: 04m 24s | Total: 02h 29m 28s] | VRAM: 533MB / 14076MB
+[2026-10-03 20:35:20] Epoch [55/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0375 (ASL: 0.0173, Grp: 0.0202) | LR: 1.89e-05 | Speed: 337.7 img/s | ETA: [Epoch: 03m 42s | Total: 02h 28m 46s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 55/75 Complete | Train Loss: 0.0363 (ASL: 0.0145, Grp: 0.0218) | LR: 1.74e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+55   Jyothiradithya Lingam      2026-10-03 20:41   EXP-006    0.5803    0.1316    0.1742    0.2874    0.3322    0.0603   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.38%
+
+[2026-10-03 20:41:57] Epoch [56/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0322 (ASL: 0.0133, Grp: 0.0188) | LR: 1.74e-05 | Speed: 327.1 img/s | ETA: [Epoch: 04m 24s | Total: 02h 22m 32s] | VRAM: 533MB / 14076MB
+[2026-10-03 20:42:29] Epoch [56/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0324 (ASL: 0.0129, Grp: 0.0195) | LR: 1.74e-05 | Speed: 336.1 img/s | ETA: [Epoch: 03m 43s | Total: 02h 21m 52s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 56/75 Complete | Train Loss: 0.0357 (ASL: 0.0144, Grp: 0.0212) | LR: 1.59e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+56   Jyothiradithya Lingam      2026-10-03 20:48   EXP-006    0.5810    0.1315    0.1765    0.2845    0.3345    0.0598   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.19%
+
+[2026-10-03 20:49:04] Epoch [57/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0511 (ASL: 0.0167, Grp: 0.0345) | LR: 1.59e-05 | Speed: 325.1 img/s | ETA: [Epoch: 04m 25s | Total: 02h 14m 35s] | VRAM: 533MB / 14076MB
+[2026-10-03 20:49:36] Epoch [57/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0356 (ASL: 0.0140, Grp: 0.0216) | LR: 1.59e-05 | Speed: 336.6 img/s | ETA: [Epoch: 03m 43s | Total: 02h 13m 52s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 57/75 Complete | Train Loss: 0.0358 (ASL: 0.0144, Grp: 0.0214) | LR: 1.44e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+57   Jyothiradithya Lingam      2026-10-03 20:55   EXP-006    0.5813    0.1316    0.1762    0.2865    0.3356    0.0603   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.33%
+
+[2026-10-03 20:56:14] Epoch [58/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0381 (ASL: 0.0145, Grp: 0.0236) | LR: 1.44e-05 | Speed: 327.8 img/s | ETA: [Epoch: 04m 23s | Total: 02h 08m 50s] | VRAM: 533MB / 14076MB
+[2026-10-03 20:56:46] Epoch [58/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0229 (ASL: 0.0121, Grp: 0.0108) | LR: 1.44e-05 | Speed: 338.1 img/s | ETA: [Epoch: 03m 42s | Total: 02h 08m 09s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 58/75 Complete | Train Loss: 0.0350 (ASL: 0.0143, Grp: 0.0207) | LR: 1.30e-05 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+58   Jyothiradithya Lingam      2026-10-03 21:02   EXP-006    0.5807    0.1320    0.1722    0.2877    0.3345    0.0603   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.22%
+
+[2026-10-03 21:03:25] Epoch [59/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0383 (ASL: 0.0148, Grp: 0.0235) | LR: 1.30e-05 | Speed: 326.5 img/s | ETA: [Epoch: 04m 24s | Total: 02h 01m 31s] | VRAM: 533MB / 14076MB
+[2026-10-03 21:03:57] Epoch [59/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0421 (ASL: 0.0163, Grp: 0.0258) | LR: 1.30e-05 | Speed: 336.6 img/s | ETA: [Epoch: 03m 43s | Total: 02h 00m 50s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 59/75 Complete | Train Loss: 0.0346 (ASL: 0.0142, Grp: 0.0204) | LR: 1.17e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+59   Jyothiradithya Lingam      2026-10-03 21:10   EXP-006    0.5801    0.1318    0.1713    0.2886    0.3302    0.0605   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.30%
+
+[2026-10-03 21:10:35] Epoch [60/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0338 (ASL: 0.0134, Grp: 0.0205) | LR: 1.17e-05 | Speed: 326.0 img/s | ETA: [Epoch: 04m 25s | Total: 01h 54m 09s] | VRAM: 533MB / 14076MB
+[2026-10-03 21:11:07] Epoch [60/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0371 (ASL: 0.0159, Grp: 0.0211) | LR: 1.17e-05 | Speed: 336.8 img/s | ETA: [Epoch: 03m 43s | Total: 01h 53m 28s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 60/75 Complete | Train Loss: 0.0341 (ASL: 0.0140, Grp: 0.0201) | LR: 1.05e-05 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+60   Jyothiradithya Lingam      2026-10-03 21:17   EXP-006    0.5804    0.1335    0.1753    0.2877    0.3342    0.0619   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.04%
+
+[2026-10-03 21:17:43] Epoch [61/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0387 (ASL: 0.0156, Grp: 0.0232) | LR: 1.05e-05 | Speed: 326.2 img/s | ETA: [Epoch: 04m 25s | Total: 01h 46m 30s] | VRAM: 533MB / 14076MB
+[2026-10-03 21:18:15] Epoch [61/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0330 (ASL: 0.0124, Grp: 0.0205) | LR: 1.05e-05 | Speed: 336.0 img/s | ETA: [Epoch: 03m 44s | Total: 01h 45m 49s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 61/75 Complete | Train Loss: 0.0344 (ASL: 0.0140, Grp: 0.0204) | LR: 9.27e-06 | Duration: 04m 44s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+61   Jyothiradithya Lingam      2026-10-03 21:24   EXP-006    0.5803    0.1322    0.1745    0.2883    0.3354    0.0603   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.24%
+
+[2026-10-03 21:24:54] Epoch [62/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0369 (ASL: 0.0146, Grp: 0.0223) | LR: 9.27e-06 | Speed: 327.7 img/s | ETA: [Epoch: 04m 23s | Total: 01h 40m 07s] | VRAM: 533MB / 14076MB
+[2026-10-03 21:25:26] Epoch [62/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0384 (ASL: 0.0154, Grp: 0.0230) | LR: 9.27e-06 | Speed: 337.9 img/s | ETA: [Epoch: 03m 42s | Total: 01h 39m 26s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 62/75 Complete | Train Loss: 0.0338 (ASL: 0.0139, Grp: 0.0199) | LR: 8.16e-06 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+62   Jyothiradithya Lingam      2026-10-03 21:31   EXP-006    0.5822    0.1347    0.1785    0.2926    0.3339    0.0618   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.21%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5822 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.582243 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 21:32:03] Epoch [63/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0429 (ASL: 0.0157, Grp: 0.0273) | LR: 8.16e-06 | Speed: 327.3 img/s | ETA: [Epoch: 04m 24s | Total: 01h 32m 26s] | VRAM: 533MB / 14076MB
+[2026-10-03 21:32:35] Epoch [63/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0303 (ASL: 0.0137, Grp: 0.0166) | LR: 8.16e-06 | Speed: 337.7 img/s | ETA: [Epoch: 03m 42s | Total: 01h 31m 45s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 63/75 Complete | Train Loss: 0.0338 (ASL: 0.0140, Grp: 0.0199) | LR: 7.12e-06 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+63   Jyothiradithya Lingam      2026-10-03 21:38   EXP-006    0.5827    0.1348    0.1785    0.2886    0.3354    0.0623   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.21%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5827 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.582697 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 21:39:16] Epoch [64/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0314 (ASL: 0.0125, Grp: 0.0190) | LR: 7.12e-06 | Speed: 327.2 img/s | ETA: [Epoch: 04m 24s | Total: 01h 26m 03s] | VRAM: 533MB / 14076MB
+[2026-10-03 21:39:48] Epoch [64/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0370 (ASL: 0.0138, Grp: 0.0232) | LR: 7.12e-06 | Speed: 338.6 img/s | ETA: [Epoch: 03m 42s | Total: 01h 25m 21s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 64/75 Complete | Train Loss: 0.0335 (ASL: 0.0137, Grp: 0.0198) | LR: 6.16e-06 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+64   Jyothiradithya Lingam      2026-10-03 21:45   EXP-006    0.5824    0.1340    0.1785    0.2900    0.3362    0.0618   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.27%
+
+[2026-10-03 21:46:28] Epoch [65/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0368 (ASL: 0.0142, Grp: 0.0226) | LR: 6.16e-06 | Speed: 327.0 img/s | ETA: [Epoch: 04m 24s | Total: 01h 18m 50s] | VRAM: 533MB / 14076MB
+[2026-10-03 21:47:00] Epoch [65/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0318 (ASL: 0.0126, Grp: 0.0192) | LR: 6.16e-06 | Speed: 336.8 img/s | ETA: [Epoch: 03m 43s | Total: 01h 18m 09s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 65/75 Complete | Train Loss: 0.0330 (ASL: 0.0137, Grp: 0.0194) | LR: 5.28e-06 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+65   Jyothiradithya Lingam      2026-10-03 21:53   EXP-006    0.5815    0.1337    0.1802    0.2865    0.3339    0.0614   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.16%
+
+[2026-10-03 21:53:38] Epoch [66/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0320 (ASL: 0.0136, Grp: 0.0184) | LR: 5.28e-06 | Speed: 327.0 img/s | ETA: [Epoch: 04m 24s | Total: 01h 11m 19s] | VRAM: 533MB / 14076MB
+[2026-10-03 21:54:10] Epoch [66/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0344 (ASL: 0.0153, Grp: 0.0191) | LR: 5.28e-06 | Speed: 338.1 img/s | ETA: [Epoch: 03m 42s | Total: 01h 10m 38s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 66/75 Complete | Train Loss: 0.0334 (ASL: 0.0138, Grp: 0.0197) | LR: 4.48e-06 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+66   Jyothiradithya Lingam      2026-10-03 22:00   EXP-006    0.5810    0.1334    0.1785    0.2851    0.3322    0.0607   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.23%
+
+[2026-10-03 22:00:52] Epoch [67/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0356 (ASL: 0.0138, Grp: 0.0218) | LR: 4.48e-06 | Speed: 327.3 img/s | ETA: [Epoch: 04m 24s | Total: 01h 04m 37s] | VRAM: 533MB / 14076MB
+[2026-10-03 22:01:24] Epoch [67/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0307 (ASL: 0.0137, Grp: 0.0170) | LR: 4.48e-06 | Speed: 338.9 img/s | ETA: [Epoch: 03m 42s | Total: 01h 03m 55s] | VRAM: 533MB / 14076MB
+[EXP-006] Epoch 67/75 Complete | Train Loss: 0.0328 (ASL: 0.0136, Grp: 0.0192) | LR: 3.75e-06 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+67   Jyothiradithya Lingam      2026-10-03 22:07   EXP-006    0.5823    0.1345    0.1800    0.2883    0.3359    0.0616   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.20%
+
+[2026-10-03 22:08:00] Epoch [68/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0256 (ASL: 0.0121, Grp: 0.0136) | LR: 3.75e-06 | Speed: 332.2 img/s | ETA: [Epoch: 04m 20s | Total: 56m 38s] | VRAM: 533MB / 14076MB
+[2026-10-03 22:08:32] Epoch [68/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0361 (ASL: 0.0137, Grp: 0.0224) | LR: 3.75e-06 | Speed: 340.8 img/s | ETA: [Epoch: 03m 40s | Total: 55m 59s] | VRAM: 533MB / 14076MBEXP-006] Epoch 68/75 Complete | Train Loss: 0.0325 (ASL: 0.0136, Grp: 0.0189) | LR: 3.11e-06 | Duration: 04m 42s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+68   Jyothiradithya Lingam      2026-10-03 22:14   EXP-006    0.5826    0.1348    0.1814    0.2877    0.3374    0.0613   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.33%
+
+[2026-10-03 22:15:10] Epoch [69/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0297 (ASL: 0.0135, Grp: 0.0161) | LR: 3.11e-06 | Speed: 327.9 img/s | ETA: [Epoch: 04m 23s | Total: 49m 46s] | VRAM: 533MB / 14076MB
+[2026-10-03 22:15:42] Epoch [69/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0266 (ASL: 0.0124, Grp: 0.0142) | LR: 3.11e-06 | Speed: 338.6 img/s | ETA: [Epoch: 03m 42s | Total: 49m 04s] | VRAM: 533MB / 14076MBEXP-006] Epoch 69/75 Complete | Train Loss: 0.0325 (ASL: 0.0135, Grp: 0.0190) | LR: 2.56e-06 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+69   Jyothiradithya Lingam      2026-10-03 22:21   EXP-006    0.5826    0.1342    0.1788    0.2880    0.3380    0.0613   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.22%
+
+[2026-10-03 22:22:21] Epoch [70/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0312 (ASL: 0.0128, Grp: 0.0184) | LR: 2.56e-06 | Speed: 330.4 img/s | ETA: [Epoch: 04m 21s | Total: 42m 43s] | VRAM: 533MB / 14076MB
+[2026-10-03 22:22:53] Epoch [70/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0317 (ASL: 0.0153, Grp: 0.0163) | LR: 2.56e-06 | Speed: 340.0 img/s | ETA: [Epoch: 03m 41s | Total: 42m 03s] | VRAM: 533MB / 14076MBEXP-006] Epoch 70/75 Complete | Train Loss: 0.0329 (ASL: 0.0136, Grp: 0.0193) | LR: 2.08e-06 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+70   Jyothiradithya Lingam      2026-10-03 22:28   EXP-006    0.5822    0.1339    0.1814    0.2865    0.3391    0.0608   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.12%
+
+[2026-10-03 22:29:29] Epoch [71/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0303 (ASL: 0.0150, Grp: 0.0153) | LR: 2.08e-06 | Speed: 327.7 img/s | ETA: [Epoch: 04m 23s | Total: 35m 15s] | VRAM: 533MB / 14076MB
+[2026-10-03 22:30:01] Epoch [71/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0325 (ASL: 0.0129, Grp: 0.0197) | LR: 2.08e-06 | Speed: 338.8 img/s | ETA: [Epoch: 03m 42s | Total: 34m 33s] | VRAM: 533MB / 14076MBEXP-006] Epoch 71/75 Complete | Train Loss: 0.0325 (ASL: 0.0134, Grp: 0.0191) | LR: 1.69e-06 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+71   Jyothiradithya Lingam      2026-10-03 22:36   EXP-006    0.5823    0.1339    0.1791    0.2891    0.3362    0.0611   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.16%
+
+[2026-10-03 22:36:38] Epoch [72/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0349 (ASL: 0.0147, Grp: 0.0201) | LR: 1.69e-06 | Speed: 328.1 img/s | ETA: [Epoch: 04m 23s | Total: 28m 12s] | VRAM: 533MB / 14076MB
+[2026-10-03 22:37:09] Epoch [72/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0278 (ASL: 0.0127, Grp: 0.0151) | LR: 1.69e-06 | Speed: 339.4 img/s | ETA: [Epoch: 03m 41s | Total: 27m 30s] | VRAM: 533MB / 14076MBEXP-006] Epoch 72/75 Complete | Train Loss: 0.0321 (ASL: 0.0135, Grp: 0.0186) | LR: 1.39e-06 | Duration: 04m 42s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+72   Jyothiradithya Lingam      2026-10-03 22:43   EXP-006    0.5818    0.1332    0.1785    0.2883    0.3377    0.0608   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.17%
+
+[2026-10-03 22:43:52] Epoch [73/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0363 (ASL: 0.0146, Grp: 0.0216) | LR: 1.39e-06 | Speed: 327.5 img/s | ETA: [Epoch: 04m 24s | Total: 21m 23s] | VRAM: 533MB / 14076MB
+[2026-10-03 22:44:24] Epoch [73/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0244 (ASL: 0.0120, Grp: 0.0125) | LR: 1.39e-06 | Speed: 338.7 img/s | ETA: [Epoch: 03m 42s | Total: 20m 41s] | VRAM: 533MB / 14076MBEXP-006] Epoch 73/75 Complete | Train Loss: 0.0325 (ASL: 0.0135, Grp: 0.0190) | LR: 1.17e-06 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+73   Jyothiradithya Lingam      2026-10-03 22:50   EXP-006    0.5818    0.1337    0.1794    0.2897    0.3368    0.0612   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.21%
+
+[2026-10-03 22:51:02] Epoch [74/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0293 (ASL: 0.0127, Grp: 0.0166) | LR: 1.17e-06 | Speed: 329.0 img/s | ETA: [Epoch: 04m 22s | Total: 13m 57s] | VRAM: 533MB / 14076MB
+[2026-10-03 22:51:33] Epoch [74/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0330 (ASL: 0.0134, Grp: 0.0197) | LR: 1.17e-06 | Speed: 340.3 img/s | ETA: [Epoch: 03m 41s | Total: 13m 15s] | VRAM: 533MB / 14076MBEXP-006] Epoch 74/75 Complete | Train Loss: 0.0321 (ASL: 0.0134, Grp: 0.0187) | LR: 1.04e-06 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+74   Jyothiradithya Lingam      2026-10-03 22:57   EXP-006    0.5827    0.1346    0.1811    0.2912    0.3388    0.0616   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.13%
+*** NEW BEST VALIDATION SCORE: mADM = 0.5827 ***
+
+[EXP-006] *** NEW BEST VALIDATION mADM: 0.582726 -> Saved to /kaggle/working/checkpoints/EXP-006_best.pth ***
+[2026-10-03 22:58:08] Epoch [75/75] | Batch [0025/0218] ( 11.5%) | Loss: 0.0286 (ASL: 0.0137, Grp: 0.0149) | LR: 1.04e-06 | Speed: 327.6 img/s | ETA: [Epoch: 04m 23s | Total: 06m 45s] | VRAM: 533MB / 14076MB
+[2026-10-03 22:58:40] Epoch [75/75] | Batch [0050/0218] ( 22.9%) | Loss: 0.0280 (ASL: 0.0126, Grp: 0.0153) | LR: 1.04e-06 | Speed: 338.6 img/s | ETA: [Epoch: 03m 42s | Total: 06m 04s] | VRAM: 533MB / 14076MBEXP-006] Epoch 75/75 Complete | Train Loss: 0.0319 (ASL: 0.0134, Grp: 0.0185) | LR: 1.00e-06 | Duration: 04m 43s
+[EXP-006] Running full validation evaluation (33,407 gallery, 3,462 queries)...
+75   Jyothiradithya Lingam      2026-10-03 23:04   EXP-006    0.5827    0.1343    0.1794    0.2897    0.3365    0.0616   
+Pedestrian Attribute Recognition (PAR) Mean Accuracy: 83.20%
+
+Reading checkpoint config from: /kaggle/working/checkpoints/EXP-006_best.pth...
+Packaging model: 'solider_swin_tiny' | Input Resolution: 256x128 | TTA: False | Temp: 1.0 | Metric: cosine
+Saved optimized deployment weights (106.83 MB)
+Successfully packaged submission to: submissions/EXP-006_submission.zip
+Archive size: 98.84 MB
+[EXP-006] Auto-packaged Codabench submission: submissions/EXP-006_submission.zip (98.84 MB)
+[EXP-006] Training execution finished! Peak Validation mADM: 0.582726
+SUCCESS: Standalone Codabench submission package ready!
+Location: /kaggle/working/EXP-006_submission.zip (98.84 MB)
+You can now download this zip file directly from the Kaggle Output tab and submit to Codabench!
