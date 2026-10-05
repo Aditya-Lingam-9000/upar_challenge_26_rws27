@@ -187,16 +187,25 @@ class VisualStream(nn.Module):
             if hasattr(self.backbone.trunk, "patch_embed"):
                 p_size = self.backbone.trunk.patch_embed.patch_size
                 actual_p = p_size[0] if isinstance(p_size, (tuple, list)) else p_size
+                exp_size = getattr(self.backbone.trunk.patch_embed, "img_size", (224, 224))
+                expected_size = exp_size if isinstance(exp_size, (tuple, list)) else (exp_size, exp_size)
             else:
                 actual_p = self.patch_size
+                expected_size = (224, 224)
 
             # Timm / EVA-02 backbone: pad horizontally to square if H > W to respect RoPE/positional grid
             if H > W:
                 pad_w = (H - W) // 2
-                images_in = F.pad(images, (pad_w, pad_w, 0, 0))
+                images_pad = F.pad(images, (pad_w, pad_w, 0, 0))
             else:
                 pad_w = 0
-                images_in = images
+                images_pad = images
+
+            # Scale to backbone's expected native resolution (e.g. 224x224 or 336x336)
+            if images_pad.shape[-2:] != expected_size:
+                images_in = F.interpolate(images_pad, size=expected_size, mode="bicubic", align_corners=False)
+            else:
+                images_in = images_pad
 
             feats = self.backbone.trunk.forward_features(images_in)
             if isinstance(feats, dict):
@@ -206,19 +215,23 @@ class VisualStream(nn.Module):
                 cls_token = feats[:, 0, :]
                 patch_tokens_all = feats[:, 1:, :]
 
+            grid_h = expected_size[0] // actual_p
+            grid_w = expected_size[1] // actual_p
+            grid = patch_tokens_all.view(B, grid_h, grid_w, -1)
+
             if pad_w > 0:
-                grid_size = H // actual_p
-                grid = patch_tokens_all.view(B, grid_size, grid_size, -1)
-                col_start = pad_w // actual_p
-                col_end = col_start + (W // actual_p)
+                col_start = int(grid_w * (pad_w / images_pad.shape[-1]))
+                col_span = max(1, int(grid_w * (W / images_pad.shape[-1])))
+                col_end = col_start + col_span
                 ped_grid = grid[:, :, col_start:col_end, :] # [B, num_rows, num_cols, in_dim]
                 ped_rows = ped_grid.shape[1]
                 ped_cols = ped_grid.shape[2]
                 patch_tokens = ped_grid.reshape(B, -1, ped_grid.shape[-1])
             else:
+                ped_grid = grid
+                ped_rows = grid_h
+                ped_cols = grid_w
                 patch_tokens = patch_tokens_all
-                ped_rows = H // actual_p
-                ped_cols = W // actual_p
 
         elif hasattr(self.backbone, "forward_features"):
             feats = self.backbone.forward_features(images)
