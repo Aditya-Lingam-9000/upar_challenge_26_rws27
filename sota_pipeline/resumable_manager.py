@@ -130,9 +130,13 @@ class ResumableCheckpointManager:
 
         # Restore LR scheduler step progression
         if scheduler is not None and checkpoint.get("scheduler_state_dict") is not None:
-            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+            sched_dict = checkpoint["scheduler_state_dict"]
+            # Preserve target T_max if user extended total epochs (e.g. 10 -> 50)
+            if hasattr(scheduler, "T_max") and "T_max" in sched_dict:
+                sched_dict["T_max"] = scheduler.T_max
+            scheduler.load_state_dict(sched_dict)
             current_lr = scheduler.get_last_lr()[0] if hasattr(scheduler, "get_last_lr") else 0.0
-            print(f"[RESUME] LR Scheduler state restored. Next LR: {current_lr:.2e}")
+            print(f"[RESUME] LR Scheduler state restored (T_max={getattr(scheduler, 'T_max', 'N/A')}). Next LR: {current_lr:.2e}")
 
         # Restore GradScaler scale and skip history
         if scaler is not None and checkpoint.get("scaler_state_dict") is not None:

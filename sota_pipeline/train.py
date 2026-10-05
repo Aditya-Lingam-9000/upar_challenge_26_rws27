@@ -209,9 +209,35 @@ def main():
     # Auto-resume from argument or previous checkpoint file if present
     resume_path = args.resume
     if resume_path is None:
-        default_last = os.path.join(args.checkpoint_dir, "last_checkpoint.pt")
-        if os.path.isfile(default_last):
-            resume_path = default_last
+        candidates = [
+            os.path.join(args.checkpoint_dir, "last_checkpoint.pt"),
+            os.path.join(args.checkpoint_dir, "best_model.pt"),
+            os.path.join("/kaggle/working", "checkpoints_sota", "last_checkpoint.pt"),
+            os.path.join("/kaggle/working", "checkpoints_sota", "best_model.pt"),
+        ]
+        for c in candidates:
+            if os.path.isfile(c):
+                resume_path = c
+                break
+
+        # If not found locally, recursively search /kaggle/input for any previous session checkpoint
+        if resume_path is None and os.path.isdir("/kaggle/input"):
+            print("[AUTO-RESUME] Searching /kaggle/input for previous session checkpoints...")
+            for root, _, files in os.walk("/kaggle/input"):
+                if "last_checkpoint.pt" in files:
+                    found = os.path.join(root, "last_checkpoint.pt")
+                    if os.path.isfile(found):
+                        resume_path = found
+                        print(f"[AUTO-RESUME] Discovered previous session checkpoint at: {resume_path}")
+                        break
+            if resume_path is None:
+                for root, _, files in os.walk("/kaggle/input"):
+                    if "best_model.pt" in files:
+                        found = os.path.join(root, "best_model.pt")
+                        if os.path.isfile(found):
+                            resume_path = found
+                            print(f"[AUTO-RESUME] Discovered previous best model at: {resume_path}")
+                            break
 
     if resume_path is not None and os.path.isfile(resume_path):
         start_epoch, global_step, best_val_madm = resumable_mgr.load_checkpoint(
