@@ -553,6 +553,15 @@ class SOTAChampionshipModel(nn.Module):
                 elif hasattr(visual_backbone, "trunk") and hasattr(visual_backbone.trunk, "set_grad_checkpointing"):
                     visual_backbone.trunk.set_grad_checkpointing(True)
 
+                # Nullify unused classification heads to eliminate dead parameters
+                if hasattr(visual_backbone, "trunk"):
+                    if hasattr(visual_backbone.trunk, "head"):
+                        visual_backbone.trunk.head = nn.Identity()
+                    if hasattr(visual_backbone.trunk, "fc"):
+                        visual_backbone.trunk.fc = nn.Identity()
+                if hasattr(visual_backbone, "head"):
+                    visual_backbone.head = nn.Identity()
+
                 if hasattr(visual_backbone, "output_dim") and visual_backbone.output_dim:
                     in_dim = visual_backbone.output_dim
                 elif hasattr(visual_backbone, "trunk") and hasattr(visual_backbone.trunk, "embed_dim"):

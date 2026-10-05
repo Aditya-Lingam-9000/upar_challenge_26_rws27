@@ -163,7 +163,7 @@ def main():
     model.to(device)
 
     if world_size > 1:
-        model = DDP(model, device_ids=[local_rank] if torch.cuda.is_available() else None, find_unused_parameters=False)
+        model = DDP(model, device_ids=[local_rank] if torch.cuda.is_available() else None, find_unused_parameters=True)
 
     # 3. Optimizer & Schedulers
     param_groups = build_parameter_groups(model, args.backbone_lr, args.adapter_lr, cfg.weight_decay)
