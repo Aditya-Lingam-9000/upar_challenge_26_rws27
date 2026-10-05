@@ -15,9 +15,10 @@ import math
 import os
 import sys
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.distributed as dist
 from torch.cuda.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -90,12 +91,17 @@ def main():
     parser.add_argument("--output_dir", type=str, default="sota_outputs")
     parser.add_argument("--checkpoint_dir", type=str, default="checkpoints_sota")
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint .pt to resume from")
-    parser.add_argument("--epochs", type=int, default=70)
+    parser.add_argument("--epochs", type=int, default=10, help="Number of epochs to train")
     parser.add_argument("--batch_size", type=int, default=64, help="Per-GPU batch size")
+    parser.add_argument("--accumulation_steps", type=int, default=2, help="Gradient accumulation steps")
     parser.add_argument("--backbone_lr", type=float, default=5e-5)
     parser.add_argument("--adapter_lr", type=float, default=3.5e-4)
     parser.add_argument("--min_lr", type=float, default=1e-6)
     parser.add_argument("--max_session_hours", type=float, default=10.75)
+    parser.add_argument("--eval_every", type=int, default=1, help="Validation interval in epochs")
+    parser.add_argument("--val_queries", type=int, default=500, help="Number of queries for validation")
+    parser.add_argument("--log_interval", type=int, default=25, help="Step-wise log interval")
+    parser.add_argument("--run_baseline", action="store_true", help="Run initial zero-shot validation before training")
     parser.add_argument("--no_amp", action="store_true", help="Disable automatic mixed precision")
     args = parser.parse_args()
 
@@ -107,10 +113,11 @@ def main():
 
     if is_master:
         print("=" * 80)
-        print(f"[SOTA-RUN] Starting Unconstrained Championship Training Pipeline")
-        print(f"[SOTA-RUN] Device: {device} | World Size (DDP): {world_size}")
-        print(f"[SOTA-RUN] Effective Global Batch Size: {args.batch_size * world_size}")
-        print(f"[SOTA-RUN] Target Epochs: {args.epochs} | Wall-Clock Budget: {args.max_session_hours} hours")
+        print(f"[SOTA-CHAMPIONSHIP] Dual-GPU Distributed Multi-Modal Training Pipeline")
+        print(f"[SOTA-CHAMPIONSHIP] Device: {device} | World Size (DDP): {world_size}")
+        print(f"[SOTA-CHAMPIONSHIP] Batch Size: {args.batch_size}/GPU | Global: {args.batch_size * world_size} | Effective: {args.batch_size * world_size * args.accumulation_steps}")
+        print(f"[SOTA-CHAMPIONSHIP] Epochs: {args.epochs} | Session Timeout Budget: {args.max_session_hours} hours")
+        print(f"[SOTA-CHAMPIONSHIP] Checkpoint Directory: {os.path.abspath(args.checkpoint_dir)}")
         print("=" * 80)
 
     # 1. Datasets and Loaders
@@ -156,14 +163,12 @@ def main():
     model.to(device)
 
     if world_size > 1:
-        # find_unused_parameters=False avoids reducer traversals and warning
         model = DDP(model, device_ids=[local_rank] if torch.cuda.is_available() else None, find_unused_parameters=False)
 
     # 3. Optimizer & Schedulers
     param_groups = build_parameter_groups(model, args.backbone_lr, args.adapter_lr, cfg.weight_decay)
     optimizer = torch.optim.AdamW(param_groups, betas=(0.9, 0.999), eps=1e-8)
     
-    # Cosine Annealing with Warmup
     warmup_epochs = cfg.warmup_epochs
     total_epochs = args.epochs
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -213,6 +218,21 @@ def main():
             device=device
         )
 
+    # Optional Epoch 0 Baseline Zero-Shot Validation
+    if start_epoch == 1 and args.run_baseline and is_master and val_dataset is not None:
+        print("\n" + "=" * 80)
+        print("[BASELINE] Running Initial Pretrained Zero-Shot Validation (Epoch 0 Baseline)...")
+        print("=" * 80)
+        base_results = evaluate_retrieval(
+            model=model,
+            val_dataset=val_dataset,
+            batch_size=args.batch_size * 2,
+            num_queries=min(args.val_queries, len(val_dataset)),
+            device=device
+        )
+        best_val_madm = base_results.get("mADM_RRF", 0.0)
+        print(f"[BASELINE] Pretrained Zero-Shot Established: mADM = {best_val_madm:.4f}\n")
+
     # 6. Main Optimization Loop
     for epoch in range(start_epoch, total_epochs + 1):
         if train_sampler is not None:
@@ -222,6 +242,7 @@ def main():
         epoch_loss = 0.0
         num_batches = len(train_loader)
         t_epoch_start = time.time()
+        optimizer.zero_grad(set_to_none=True)
 
         for batch_idx, batch in enumerate(train_loader, start=1):
             images = batch["image"].to(device, non_blocking=True)
@@ -229,8 +250,6 @@ def main():
             text_tokens = batch["text_tokens"].to(device, non_blocking=True)
             masked_tokens = batch["masked_tokens"].to(device, non_blocking=True)
             masked_labels = batch["masked_labels"].to(device, non_blocking=True)
-
-            optimizer.zero_grad(set_to_none=True)
 
             with autocast(enabled=use_amp):
                 outputs = model(images, text_tokens, masked_tokens=masked_tokens)
@@ -248,24 +267,50 @@ def main():
                     vocab_logits=vocab_logits,
                     masked_labels=masked_labels,
                 )
+                loss_scaled = loss / args.accumulation_steps
 
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
-            scaler.step(optimizer)
-            scaler.update()
+            scaler.scale(loss_scaled).backward()
+
+            if batch_idx % args.accumulation_steps == 0 or batch_idx == num_batches:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad(set_to_none=True)
 
             epoch_loss += loss.item()
             global_step += 1
 
-            if is_master and (batch_idx % 25 == 0 or batch_idx == num_batches):
-                curr_lr = optimizer.param_groups[1]["lr"] # Head LR
+            if is_master and (batch_idx % args.log_interval == 0 or batch_idx == num_batches):
                 elapsed = time.time() - t_epoch_start
                 speed = (batch_idx * args.batch_size * world_size) / max(elapsed, 1e-4)
+
+                # Real-Time Precise ETAs
+                steps_done = batch_idx
+                steps_rem = num_batches - steps_done
+                sec_per_step = elapsed / max(steps_done, 1)
+                ep_eta_sec = steps_rem * sec_per_step
+                ep_eta_str = f"{int(ep_eta_sec // 60):02d}m {int(ep_eta_sec % 60):02d}s"
+
+                total_steps_rem = (total_epochs - epoch) * num_batches + steps_rem
+                total_eta_sec = total_steps_rem * sec_per_step
+                total_eta_str = f"{int(total_eta_sec // 3600):02d}h {int((total_eta_sec % 3600) // 60):02d}m"
+
+                # Dual GPU VRAM Telemetry
+                vram_str = ""
+                if torch.cuda.is_available():
+                    vram_parts = [f"GPU{d}: {torch.cuda.memory_reserved(d) / (1024**3):.1f}GB" for d in range(torch.cuda.device_count())]
+                    vram_str = " | " + " | ".join(vram_parts)
+
+                loss_val = loss.item()
+                sdm_val = metrics.get("loss_sdm", 0.0)
+                asl_val = metrics.get("loss_asl", 0.0)
+                mlm_val = metrics.get("loss_mlm", 0.0)
+
                 print(
-                    f"[TRAIN] Ep [{epoch:02d}/{total_epochs:02d}] | Batch [{batch_idx:04d}/{num_batches:04d}] | "
-                    f"Loss: {loss.item():.4f} (SDM: {metrics['loss_sdm']:.2f}, ASL: {metrics['loss_asl']:.2f}) | "
-                    f"LR: {curr_lr:.2e} | Speed: {speed:.1f} img/s"
+                    f"[Ep {epoch:02d}/{total_epochs:02d}] | Step [{batch_idx:04d}/{num_batches:04d}] | "
+                    f"Loss: {loss_val:.4f} (SDM: {sdm_val:.2f}, ASL: {asl_val:.2f}, MLM: {mlm_val:.2f}) | "
+                    f"Ep ETA: {ep_eta_str} | Run ETA: {total_eta_str} | Speed: {speed:.1f} img/s{vram_str}"
                 )
 
         if epoch > warmup_epochs:
@@ -273,22 +318,25 @@ def main():
 
         avg_loss = epoch_loss / max(num_batches, 1)
         if is_master:
-            print(f"\n[TRAIN] Epoch {epoch:02d} Complete. Avg Multi-Task Loss: {avg_loss:.4f}\n")
+            print(f"\n[TRAIN] Epoch {epoch:02d}/{total_epochs:02d} Completed. Mean Multi-Task Loss: {avg_loss:.4f}\n")
 
-        # 7. Validation Evaluation
-        if is_master and (epoch % cfg.eval_every_epochs == 0 or epoch == total_epochs):
+        # 7. Validation Evaluation After Every Epoch
+        if is_master and val_dataset is not None and (epoch % args.eval_every == 0 or epoch == total_epochs):
+            print(f"[VAL] Running Full Validation Retrieval for Epoch {epoch:02d}...")
             val_results = evaluate_retrieval(
                 model=model,
                 val_dataset=val_dataset,
                 batch_size=args.batch_size * 2,
-                num_queries=500,
+                num_queries=min(args.val_queries, len(val_dataset)),
                 device=device
             )
-            curr_madm = val_results["mADM_RRF"]
+            curr_madm = val_results.get("mADM_RRF", 0.0)
             is_best = (curr_madm > best_val_madm)
             if is_best:
                 best_val_madm = curr_madm
+                print(f"[CHECKPOINT] >>> New Historical Best Validation mADM: {best_val_madm:.4f}! <<<")
 
+            # Strictly maintain ONLY best_model.pt and last_checkpoint.pt
             resumable_mgr.save_checkpoint(
                 epoch=epoch,
                 global_step=global_step,
@@ -305,8 +353,7 @@ def main():
         if resumable_mgr.should_exit_for_timeout():
             if is_master:
                 print(f"[TIMEOUT] Reached session limit ({args.max_session_hours} hours).")
-                print(f"[TIMEOUT] Successfully preserved complete 7-component state bundle.")
-                print(f"[TIMEOUT] Ready for seamless resumption in next Kaggle session!")
+                print(f"[TIMEOUT] Preserved complete 7-component state bundle. Ready for next session!")
             break
 
     cleanup_distributed()
