@@ -178,7 +178,10 @@ def main():
     )
 
     use_amp = (not args.no_amp) and torch.cuda.is_available()
-    scaler = GradScaler(enabled=use_amp)
+    try:
+        scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
+    except (AttributeError, TypeError):
+        scaler = GradScaler(enabled=use_amp)
 
     # 4. Multi-Task Criterion
     criterion = TotalChampionshipLoss(
@@ -223,8 +226,9 @@ def main():
         print("\n" + "=" * 80)
         print("[BASELINE] Running Initial Pretrained Zero-Shot Validation (Epoch 0 Baseline)...")
         print("=" * 80)
+        val_model = model.module if hasattr(model, "module") else model
         base_results = evaluate_retrieval(
-            model=model,
+            model=val_model,
             val_dataset=val_dataset,
             batch_size=args.batch_size * 2,
             num_queries=min(args.val_queries, len(val_dataset)),
@@ -251,7 +255,8 @@ def main():
             masked_tokens = batch["masked_tokens"].to(device, non_blocking=True)
             masked_labels = batch["masked_labels"].to(device, non_blocking=True)
 
-            with autocast(enabled=use_amp):
+            device_type = "cuda" if torch.cuda.is_available() else "cpu"
+            with torch.amp.autocast(device_type=device_type, enabled=use_amp):
                 outputs = model(images, text_tokens, masked_tokens=masked_tokens)
                 img_metric = outputs["img_metric"]
                 txt_metric = outputs["txt_metric"]
@@ -323,8 +328,9 @@ def main():
         # 7. Validation Evaluation After Every Epoch
         if is_master and val_dataset is not None and (epoch % args.eval_every == 0 or epoch == total_epochs):
             print(f"[VAL] Running Full Validation Retrieval for Epoch {epoch:02d}...")
+            val_model = model.module if hasattr(model, "module") else model
             val_results = evaluate_retrieval(
-                model=model,
+                model=val_model,
                 val_dataset=val_dataset,
                 batch_size=args.batch_size * 2,
                 num_queries=min(args.val_queries, len(val_dataset)),

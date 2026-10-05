@@ -118,7 +118,8 @@ def evaluate_retrieval(
     """
     Executes full continuous metric and RRF retrieval evaluation on validation set.
     """
-    model.eval()
+    raw_model = model.module if hasattr(model, "module") else model
+    raw_model.eval()
     val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,
@@ -133,12 +134,13 @@ def evaluate_retrieval(
     gallery_labels_list = []
 
     t0 = time.time()
-    for batch in val_loader:
-        imgs = batch["image"].to(device)
-        metric_emb, attr_logits = model.extract_visual(imgs)
-        gallery_embeds_list.append(metric_emb.cpu())
-        gallery_logits_list.append(attr_logits.cpu())
-        gallery_labels_list.append(batch["attr_labels"])
+    with torch.no_grad():
+        for batch in val_loader:
+            imgs = batch["image"].to(device, non_blocking=True)
+            metric_emb, attr_logits = raw_model.extract_visual(imgs)
+            gallery_embeds_list.append(metric_emb.cpu())
+            gallery_logits_list.append(attr_logits.cpu())
+            gallery_labels_list.append(batch["attr_labels"])
 
     gallery_embeds = torch.cat(gallery_embeds_list, dim=0) # [G, D]
     gallery_logits = torch.cat(gallery_logits_list, dim=0) # [G, 40]
@@ -155,7 +157,8 @@ def evaluate_retrieval(
     prompt_engine = val_dataset.prompt_engine
     query_prompts = [prompt_engine.synthesize_prompt(query_labels[q], is_train=False) for q in range(Q)]
     query_tokens = prompt_engine.tokenize(query_prompts).to(device)
-    query_embeds = model.extract_text(query_tokens).cpu() # [Q, D]
+    with torch.no_grad():
+        query_embeds = raw_model.extract_text(query_tokens).cpu() # [Q, D]
 
     t_feat = time.time() - t0
     print(f"[EVAL] Feature extraction completed in {t_feat:.2f}s ({G} gallery items, {Q} queries).")
