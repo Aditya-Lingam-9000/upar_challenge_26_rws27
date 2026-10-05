@@ -115,10 +115,21 @@ class SOTAConfig:
 
     @classmethod
     def resolve_dataset_root(cls, user_path: Optional[str] = None) -> str:
-        """Autodetects dataset location across local workstation and Kaggle environments."""
+        """Autodetects dataset location across local workstation and Kaggle environments.
+        Prioritizes Rank 1 HDF5 binary container (.h5) for instant startup.
+        """
         candidates = [
             user_path,
             os.environ.get("UPAR_DATA_ROOT"),
+            # Rank 1: HDF5 Binary Container (Kaggle & Local)
+            "/kaggle/input/upar-binary-dataset/upar_binary_dataset.h5",
+            "/kaggle/input/upar-binary-dataset",
+            "/kaggle/input/upar-hdf5-dataset/upar_binary_dataset.h5",
+            "/kaggle/input/upar-hdf5-dataset",
+            "/kaggle/input/upar-challenge-2027-h5/upar_binary_dataset.h5",
+            "/kaggle/input/upar-challenge-2027-h5",
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "upar_binary_dataset.h5")),
+            # Legacy Directories (Kaggle & Local)
             "/kaggle/input/datasets/hinewk/upar-challenge-2027-data/data",
             "/kaggle/input/upar-challenge-2027-data/data",
             "/kaggle/input/upar-dataset/UPAR",
@@ -126,12 +137,27 @@ class SOTAConfig:
             os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "RWS27_Data")),
         ]
         for c in candidates:
-            if c and os.path.exists(c):
-                # Verify that either dataset_all.pkl or subfolders exist
-                if os.path.isfile(os.path.join(c, "dataset_all.pkl")) or os.path.isdir(os.path.join(c, "Market")):
-                    return os.path.abspath(c)
-                if os.path.isfile(c) and c.endswith(".pkl"):
-                    return os.path.dirname(os.path.abspath(c))
+            if not c or not os.path.exists(c):
+                continue
+
+            # Case A: Explicit HDF5 file
+            if os.path.isfile(c) and c.endswith((".h5", ".hdf5")):
+                return os.path.abspath(c)
+
+            # Case B: Directory containing an HDF5 file
+            if os.path.isdir(c):
+                default_h5 = os.path.join(c, "upar_binary_dataset.h5")
+                if os.path.isfile(default_h5):
+                    return os.path.abspath(default_h5)
+                for f in os.listdir(c):
+                    if f.endswith((".h5", ".hdf5")):
+                        return os.path.abspath(os.path.join(c, f))
+
+            # Case C: Legacy directory with dataset_all.pkl or Market folder
+            if os.path.isfile(os.path.join(c, "dataset_all.pkl")) or os.path.isdir(os.path.join(c, "Market")):
+                return os.path.abspath(c)
+            if os.path.isfile(c) and c.endswith(".pkl"):
+                return os.path.dirname(os.path.abspath(c))
 
         # Default fallback
         for c in candidates:

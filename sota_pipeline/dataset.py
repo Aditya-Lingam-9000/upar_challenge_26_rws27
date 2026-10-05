@@ -114,6 +114,7 @@ class SOTAUPARDataset(Dataset):
     """
     High-Performance RAM-Cached Multi-Modal Dataset.
     Supports continuous 1024-D cross-modal retrieval, MLM, and strip consistency.
+    Supports both Rank 1 Single HDF5 Binary Container (.h5) and legacy directories.
     """
 
     def __init__(
@@ -139,6 +140,26 @@ class SOTAUPARDataset(Dataset):
         )
         self.prompt_engine = prompt_engine or DynamicPromptEngine(p_dropout=0.15 if self.is_train else 0.0)
 
+        # Detect Rank 1 HDF5 binary container
+        self.is_h5 = False
+        self.h5_path: Optional[str] = None
+        self._h5_handle: Optional[Any] = None
+
+        if os.path.isfile(dataset_root) and dataset_root.endswith((".h5", ".hdf5")):
+            self.is_h5 = True
+            self.h5_path = os.path.abspath(dataset_root)
+        elif os.path.isdir(dataset_root):
+            h5_default = os.path.join(dataset_root, "upar_binary_dataset.h5")
+            if os.path.isfile(h5_default):
+                self.is_h5 = True
+                self.h5_path = h5_default
+            else:
+                for fname in os.listdir(dataset_root):
+                    if fname.endswith((".h5", ".hdf5")):
+                        self.is_h5 = True
+                        self.h5_path = os.path.join(dataset_root, fname)
+                        break
+
         # Load metadata
         self.samples, self.labels = self._load_metadata()
 
@@ -147,7 +168,8 @@ class SOTAUPARDataset(Dataset):
             self.labels = self.labels[:max_samples]
 
         self.num_samples = len(self.samples)
-        print(f"[{split.upper()}] Initialized dataset with {self.num_samples} samples.")
+        src_desc = f"HDF5: {os.path.basename(self.h5_path)}" if self.is_h5 else "Directory"
+        print(f"[{split.upper()}] Initialized dataset with {self.num_samples:,} samples ({src_desc}).")
 
         # High-Speed RAM Pre-caching
         self.ram_cache: Optional[List[Optional[bytes]]] = None
@@ -155,7 +177,20 @@ class SOTAUPARDataset(Dataset):
             self._preload_images_to_ram()
 
     def _load_metadata(self) -> Tuple[List[str], np.ndarray]:
-        """Loads image paths and 40-D attribute labels from dataset_all.pkl."""
+        """Loads image names and 40-D attribute labels from HDF5 or dataset_all.pkl."""
+        if self.is_h5 and self.h5_path:
+            import h5py
+            with h5py.File(self.h5_path, "r") as h5f:
+                if self.split not in h5f:
+                    raise KeyError(f"Split '{self.split}' not found in HDF5 {self.h5_path}. Available: {list(h5f.keys())}")
+                labels = h5f[self.split]["labels"][:]
+                raw_names = h5f[self.split]["image_names"][:]
+                samples = [
+                    (n.decode("utf-8") if isinstance(n, bytes) else str(n))
+                    for n in raw_names
+                ]
+            return samples, labels.astype(np.float32)
+
         pkl_path = os.path.join(self.dataset_root, "dataset_all.pkl")
         if not os.path.isfile(pkl_path):
             # Check parent directory
@@ -165,13 +200,10 @@ class SOTAUPARDataset(Dataset):
             with open(pkl_path, "rb") as f:
                 data = pickle.load(f)
 
-            # In UPAR dataset_all.pkl:
-            # partition['train'][8] or partition['train'][0] contains split indices
             partition = data.get("partition", {})
             split_key = "train" if self.is_train else "val"
             indices = partition.get(split_key, [])
             if isinstance(indices, list) and len(indices) > 0:
-                # If list of splits, use the combined split (index -1 or largest)
                 split_indices = indices[-1] if len(indices) == 9 else indices[0]
             else:
                 split_indices = np.arange(len(data["image_name"]))
@@ -183,10 +215,8 @@ class SOTAUPARDataset(Dataset):
             labels_list = []
             for idx in split_indices:
                 img_rel = raw_names[idx]
-                # Check absolute or relative path
                 img_path = os.path.join(self.dataset_root, img_rel)
                 if not os.path.isfile(img_path):
-                    # Check in UPAR subfolder
                     img_path = os.path.join(self.dataset_root, "UPAR", img_rel)
 
                 samples.append(img_path)
@@ -208,7 +238,20 @@ class SOTAUPARDataset(Dataset):
 
     def _preload_images_to_ram(self):
         """Preloads compressed image bytes into host system RAM."""
-        print(f"[RAM Cache] Preloading {self.num_samples} images into host RAM (16 threads)...")
+        if self.is_h5 and self.h5_path:
+            import h5py
+            import time
+            print(f"[RAM Cache] Preloading {self.num_samples:,} images from HDF5 container into host RAM...")
+            t0 = time.time()
+            with h5py.File(self.h5_path, "r") as h5f:
+                ds = h5f[self.split]["image_bytes"]
+                self.ram_cache = [bytes(ds[i]) for i in range(self.num_samples)]
+            elapsed = time.time() - t0
+            total_mb = sum(len(b) for b in self.ram_cache if b is not None) / (1024 * 1024)
+            print(f"[RAM Cache] Preloaded {len(self.ram_cache):,} images ({total_mb:.1f} MB) in {elapsed:.2f}s! All disk I/O eliminated.")
+            return
+
+        print(f"[RAM Cache] Preloading {self.num_samples:,} images into host RAM (16 threads)...")
         self.ram_cache = [None] * self.num_samples
 
         def _load_single(i):
@@ -225,16 +268,27 @@ class SOTAUPARDataset(Dataset):
 
         valid_count = sum(1 for b in self.ram_cache if b is not None)
         total_mb = sum(len(b) for b in self.ram_cache if b is not None) / (1024 * 1024)
-        print(f"[RAM Cache] Preloaded {valid_count}/{self.num_samples} images ({total_mb:.1f} MB) in RAM! Disk I/O eliminated.")
+        print(f"[RAM Cache] Preloaded {valid_count:,}/{self.num_samples:,} images ({total_mb:.1f} MB) in RAM! Disk I/O eliminated.")
+
+    def _get_h5_handle(self):
+        """Lazy per-worker HDF5 handle to prevent multi-processing fork locks."""
+        if self._h5_handle is None and self.is_h5 and self.h5_path:
+            import h5py
+            self._h5_handle = h5py.File(self.h5_path, "r", swmr=True)
+        return self._h5_handle
 
     def __len__(self) -> int:
         return self.num_samples
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
-        # 1. Load image
+        # 1. Load image (RAM Cache > Lazy HDF5 > Disk File)
         img_bytes = self.ram_cache[idx] if self.ram_cache is not None else None
         if img_bytes is not None:
             img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        elif self.is_h5:
+            h5_handle = self._get_h5_handle()
+            raw_b = bytes(h5_handle[self.split]["image_bytes"][idx])
+            img = Image.open(io.BytesIO(raw_b)).convert("RGB")
         else:
             path = self.samples[idx]
             if os.path.isfile(path):
