@@ -101,6 +101,8 @@ def main():
     parser.add_argument("--eval_every", type=int, default=1, help="Validation interval in epochs")
     parser.add_argument("--val_queries", type=int, default=500, help="Number of queries for validation")
     parser.add_argument("--log_interval", type=int, default=25, help="Step-wise log interval")
+    parser.add_argument("--eval_batch_size", type=int, default=256, help="Batch size for validation inference")
+    parser.add_argument("--num_workers", type=int, default=2, help="DataLoader workers per GPU process")
     parser.add_argument("--run_baseline", action="store_true", help="Run initial zero-shot validation before training")
     parser.add_argument("--no_amp", action="store_true", help="Disable automatic mixed precision")
     args = parser.parse_args()
@@ -135,7 +137,7 @@ def main():
         batch_size=args.batch_size,
         sampler=train_sampler,
         shuffle=(train_sampler is None),
-        num_workers=4,
+        num_workers=args.num_workers,
         pin_memory=torch.cuda.is_available(),
         drop_last=True
     )
@@ -230,7 +232,7 @@ def main():
         base_results = evaluate_retrieval(
             model=val_model,
             val_dataset=val_dataset,
-            batch_size=args.batch_size * 2,
+            batch_size=args.eval_batch_size,
             num_queries=min(args.val_queries, len(val_dataset)),
             device=device
         )
@@ -304,10 +306,17 @@ def main():
                 total_eta_sec = total_steps_rem * sec_per_step
                 total_eta_str = f"{int(total_eta_sec // 3600):02d}h {int((total_eta_sec % 3600) // 60):02d}m"
 
-                # Dual GPU VRAM Telemetry
+                # Dual GPU VRAM Telemetry (driver-level total device memory)
                 vram_str = ""
                 if torch.cuda.is_available():
-                    vram_parts = [f"GPU{d}: {torch.cuda.memory_reserved(d) / (1024**3):.1f}GB" for d in range(torch.cuda.device_count())]
+                    vram_parts = []
+                    for d in range(torch.cuda.device_count()):
+                        try:
+                            free_b, total_b = torch.cuda.mem_get_info(d)
+                            used_gb = (total_b - free_b) / (1024**3)
+                            vram_parts.append(f"GPU{d}: {used_gb:.1f}GB")
+                        except Exception:
+                            vram_parts.append(f"GPU{d}: {torch.cuda.memory_reserved(d) / (1024**3):.1f}GB")
                     vram_str = " | " + " | ".join(vram_parts)
 
                 loss_val = loss.item()
@@ -335,7 +344,7 @@ def main():
             val_results = evaluate_retrieval(
                 model=val_model,
                 val_dataset=val_dataset,
-                batch_size=args.batch_size * 2,
+                batch_size=args.eval_batch_size,
                 num_queries=min(args.val_queries, len(val_dataset)),
                 device=device
             )
