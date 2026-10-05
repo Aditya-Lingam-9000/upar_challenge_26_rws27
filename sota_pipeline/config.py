@@ -89,8 +89,8 @@ class SOTAConfig:
     # ---------------------------------------------------------
     epochs: int = 70
     warmup_epochs: int = 5
-    batch_size: int = 64          # Per-GPU batch size (128 global on Dual T4)
-    gradient_accumulation_steps: int = 2
+    batch_size: int = 32          # Per-GPU batch size (64 global on Dual T4, 256 effective with accum=4)
+    gradient_accumulation_steps: int = 4
     
     backbone_lr: float = 5e-5     # Conservative learning rate for pretrained backbone
     adapter_lr: float = 3.5e-4    # Higher learning rate for newly initialized heads

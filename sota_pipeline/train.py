@@ -236,6 +236,8 @@ def main():
         )
         best_val_madm = base_results.get("mADM_RRF", 0.0)
         print(f"[BASELINE] Pretrained Zero-Shot Established: mADM = {best_val_madm:.4f}\n")
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     # 6. Main Optimization Loop
     for epoch in range(start_epoch, total_epochs + 1):
@@ -257,12 +259,13 @@ def main():
 
             device_type = "cuda" if torch.cuda.is_available() else "cpu"
             with torch.amp.autocast(device_type=device_type, enabled=use_amp):
-                outputs = model(images, text_tokens, masked_tokens=masked_tokens)
+                outputs = model(images, text_tokens, masked_tokens=masked_tokens, masked_labels=masked_labels)
                 img_metric = outputs["img_metric"]
                 txt_metric = outputs["txt_metric"]
                 attr_logits = outputs["attr_logits"]
                 strip_embeds = outputs["strip_embeds"]
                 vocab_logits = outputs.get("vocab_logits")
+                mlm_labels = outputs.get("masked_labels", masked_labels)
 
                 loss, metrics = criterion(
                     img_metric=img_metric,
@@ -270,7 +273,7 @@ def main():
                     attr_logits=attr_logits,
                     attr_labels=attr_labels,
                     vocab_logits=vocab_logits,
-                    masked_labels=masked_labels,
+                    masked_labels=mlm_labels,
                 )
                 loss_scaled = loss / args.accumulation_steps
 
@@ -337,6 +340,8 @@ def main():
                 device=device
             )
             curr_madm = val_results.get("mADM_RRF", 0.0)
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             is_best = (curr_madm > best_val_madm)
             if is_best:
                 best_val_madm = curr_madm

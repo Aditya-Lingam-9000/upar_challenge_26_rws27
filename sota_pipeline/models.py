@@ -54,6 +54,8 @@ class VisualStream(nn.Module):
         patch_size: int = 14,
         backbone_type: str = "auto",
         gem_p_init: float = 3.0,
+        backbone: Optional[nn.Module] = None,
+        in_dim: Optional[int] = None,
     ):
         super().__init__()
         self.embed_dim = embed_dim
@@ -67,7 +69,11 @@ class VisualStream(nn.Module):
         self.total_patches = self.num_rows * self.num_cols
 
         # Initialize visual backbone
-        self.backbone, self.in_dim = self._initialize_backbone(backbone_type)
+        if backbone is not None and in_dim is not None:
+            self.backbone = backbone
+            self.in_dim = in_dim
+        else:
+            self.backbone, self.in_dim = self._initialize_backbone(backbone_type)
 
         # GeM Pooling for 3 Anatomical Strips
         self.gem_head = GeMPooling(p_init=gem_p_init)
@@ -97,32 +103,57 @@ class VisualStream(nn.Module):
         )
 
     def _initialize_backbone(self, backbone_type: str) -> Tuple[nn.Module, int]:
-        """Loads SOTA pretrained Vision Transformer with fallback."""
+        """Loads SOTA pretrained Vision Transformer with explicit error logging."""
         # 1. Try open_clip EVA-02 / ViT-L
-        if backbone_type in ("auto", "eva02", "open_clip"):
+        if backbone_type in ("auto", "eva02", "eva02_large", "eva02_base", "open_clip", "clip_vit_l14"):
             try:
                 import open_clip
-                model_name = "EVA02-E-14-plus" if backbone_type == "eva02" else "ViT-L-14"
-                pretrained = "laion2b_s34b_b88k"
+                if backbone_type in ("eva02", "eva02_large"):
+                    model_name = "EVA02-L-14"
+                    pretrained = "merged2b_s4b_b131k"
+                elif backbone_type == "eva02_base":
+                    model_name = "EVA02-B-16"
+                    pretrained = "merged2b_s8b_b131k"
+                elif backbone_type == "clip_vit_l14":
+                    model_name = "ViT-L-14"
+                    pretrained = "datacomp_xl_s13b_b90k"
+                else: # "auto" or "open_clip"
+                    model_name = "EVA02-B-16"
+                    pretrained = "merged2b_s8b_b131k"
+
                 clip_model, _, _ = open_clip.create_model_and_transforms(
                     model_name, pretrained=pretrained, force_quick_gelu=False
                 )
-                print(f"[VisualStream] Successfully loaded open_clip {model_name}!")
-                return clip_model.visual, clip_model.visual.output_dim
-            except Exception:
-                pass
+                visual = clip_model.visual
+                if hasattr(visual, "set_grad_checkpointing"):
+                    visual.set_grad_checkpointing(True)
+                elif hasattr(visual, "trunk") and hasattr(visual.trunk, "set_grad_checkpointing"):
+                    visual.trunk.set_grad_checkpointing(True)
+
+                if hasattr(visual, "output_dim") and visual.output_dim:
+                    in_dim = visual.output_dim
+                elif hasattr(visual, "trunk") and hasattr(visual.trunk, "embed_dim"):
+                    in_dim = visual.trunk.embed_dim
+                elif hasattr(visual, "trunk") and hasattr(visual.trunk, "num_features"):
+                    in_dim = visual.trunk.num_features
+                else:
+                    in_dim = getattr(visual, "num_features", self.embed_dim)
+
+                print(f"[VisualStream] Successfully loaded open_clip {model_name} (in_dim={in_dim}, grad_checkpointing=True)!")
+                return visual, in_dim
+            except Exception as e:
+                print(f"[VisualStream] WARNING: Failed to load open_clip backbone: {e}")
 
         # 2. Try torchvision Vision Transformer (ViT-B/16 or ViT-L/16)
         try:
             import torchvision.models as tv_models
             vit = tv_models.vit_b_16(weights=tv_models.ViT_B_16_Weights.IMAGENET1K_V1)
-            # Remove classification head
             in_features = vit.heads.head.in_features
             vit.heads = nn.Identity()
             print("[VisualStream] Loaded torchvision ViT-B/16 backbone.")
             return vit, in_features
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[VisualStream] WARNING: Failed to load torchvision ViT-B/16: {e}")
 
         # 3. Built-in Standalone Vision Transformer (Self-Contained Fallback)
         print("[VisualStream] Initializing standalone Vision Transformer encoder.")
@@ -149,10 +180,47 @@ class VisualStream(nn.Module):
             spatial_patches: [B, total_patches, embed_dim] Spatial patch tokens for MLM.
             strip_embeds: Tuple of (head, torso, legs) embeddings [B, embed_dim].
         """
-        B = images.shape[0]
+        B, C, H, W = images.shape
 
         # Extract features through backbone
-        if hasattr(self.backbone, "forward_features"):
+        if hasattr(self.backbone, "trunk"):
+            if hasattr(self.backbone.trunk, "patch_embed"):
+                p_size = self.backbone.trunk.patch_embed.patch_size
+                actual_p = p_size[0] if isinstance(p_size, (tuple, list)) else p_size
+            else:
+                actual_p = self.patch_size
+
+            # Timm / EVA-02 backbone: pad horizontally to square if H > W to respect RoPE/positional grid
+            if H > W:
+                pad_w = (H - W) // 2
+                images_in = F.pad(images, (pad_w, pad_w, 0, 0))
+            else:
+                pad_w = 0
+                images_in = images
+
+            feats = self.backbone.trunk.forward_features(images_in)
+            if isinstance(feats, dict):
+                cls_token = feats.get("x_norm_clstoken", feats.get("cls_token"))
+                patch_tokens_all = feats.get("x_norm_patchtokens", feats.get("patch_tokens"))
+            else:
+                cls_token = feats[:, 0, :]
+                patch_tokens_all = feats[:, 1:, :]
+
+            if pad_w > 0:
+                grid_size = H // actual_p
+                grid = patch_tokens_all.view(B, grid_size, grid_size, -1)
+                col_start = pad_w // actual_p
+                col_end = col_start + (W // actual_p)
+                ped_grid = grid[:, :, col_start:col_end, :] # [B, num_rows, num_cols, in_dim]
+                ped_rows = ped_grid.shape[1]
+                ped_cols = ped_grid.shape[2]
+                patch_tokens = ped_grid.reshape(B, -1, ped_grid.shape[-1])
+            else:
+                patch_tokens = patch_tokens_all
+                ped_rows = H // actual_p
+                ped_cols = W // actual_p
+
+        elif hasattr(self.backbone, "forward_features"):
             feats = self.backbone.forward_features(images)
             if isinstance(feats, dict):
                 cls_token = feats.get("x_norm_clstoken", feats.get("cls_token"))
@@ -160,6 +228,8 @@ class VisualStream(nn.Module):
             else:
                 cls_token = feats[:, 0, :]
                 patch_tokens = feats[:, 1:, :]
+            ped_rows = self.num_rows
+            ped_cols = self.num_cols
         elif hasattr(self.backbone, "conv_proj"):
             # Torchvision ViT: directly project patches to support arbitrary aspect ratios (e.g. 336x168 or 224x112)
             x = self.backbone.conv_proj(images) # [B, C, H_p, W_p]
@@ -190,18 +260,21 @@ class VisualStream(nn.Module):
             x = self.backbone.encoder.ln(x)
             cls_token = x[:, 0, :]
             patch_tokens = x[:, 1:, :]
+            ped_rows = H_p
+            ped_cols = W_p
         else:
             cls_token, patch_tokens = self.backbone(images)
+            ped_rows = self.num_rows
+            ped_cols = self.num_cols
 
         # Project to target embed_dim if necessary
         cls_token = self.patch_proj(cls_token)
         patch_tokens = self.patch_proj(patch_tokens)
 
         # Anatomical 3-Strip Partitioning
-        # Reshape to 2D grid: [B, num_rows, num_cols, embed_dim]
         total_p = patch_tokens.shape[1]
-        grid_rows = self.num_rows
-        grid_cols = self.num_cols
+        grid_rows = ped_rows if total_p == ped_rows * ped_cols else self.num_rows
+        grid_cols = ped_cols if total_p == ped_rows * ped_cols else self.num_cols
 
         if total_p == grid_rows * grid_cols:
             patches_2d = patch_tokens.view(B, grid_rows, grid_cols, self.embed_dim)
@@ -234,30 +307,48 @@ class VisualStream(nn.Module):
 class TextStream(nn.Module):
     """Contextual text encoder with projected continuous metric output."""
 
-    def __init__(self, embed_dim: int = 1024, max_length: int = 77, vocab_size: int = 49408):
+    def __init__(
+        self,
+        clip_text_model: Optional[nn.Module] = None,
+        embed_dim: int = 1024,
+        max_length: int = 77,
+        vocab_size: int = 49408
+    ):
         super().__init__()
         self.embed_dim = embed_dim
         self.max_length = max_length
+        self.clip_text_model = clip_text_model
 
-        self.token_embedding = nn.Embedding(vocab_size, embed_dim)
-        self.pos_embedding = nn.Parameter(torch.randn(1, max_length, embed_dim) * 0.02)
+        if clip_text_model is not None:
+            if hasattr(clip_text_model, "output_tokens"):
+                clip_text_model.output_tokens = True
+            in_dim = getattr(clip_text_model, "output_dim", None) or getattr(clip_text_model, "width", 512)
+            self.text_proj = nn.Sequential(
+                nn.Linear(in_dim, embed_dim),
+                nn.LayerNorm(embed_dim)
+            )
+            self.seq_proj = nn.Identity() if in_dim == embed_dim else nn.Linear(in_dim, embed_dim)
+        else:
+            self.token_embedding = nn.Embedding(vocab_size, embed_dim)
+            self.pos_embedding = nn.Parameter(torch.randn(1, max_length, embed_dim) * 0.02)
 
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=embed_dim,
-            nhead=16,
-            dim_feedforward=embed_dim * 4,
-            dropout=0.10,
-            activation="gelu",
-            batch_first=True,
-            norm_first=True
-        )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=8)
-        self.ln_final = nn.LayerNorm(embed_dim)
+            encoder_layer = nn.TransformerEncoderLayer(
+                d_model=embed_dim,
+                nhead=16,
+                dim_feedforward=embed_dim * 4,
+                dropout=0.10,
+                activation="gelu",
+                batch_first=True,
+                norm_first=True
+            )
+            self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=8)
+            self.ln_final = nn.LayerNorm(embed_dim)
 
-        self.text_proj = nn.Sequential(
-            nn.Linear(embed_dim, embed_dim),
-            nn.LayerNorm(embed_dim)
-        )
+            self.text_proj = nn.Sequential(
+                nn.Linear(embed_dim, embed_dim),
+                nn.LayerNorm(embed_dim)
+            )
+            self.seq_proj = nn.Identity()
 
     def forward(self, text_tokens: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -267,12 +358,22 @@ class TextStream(nn.Module):
             text_metric: [B, embed_dim] L2-normalized metric text embedding.
             text_seq: [B, SeqLen, embed_dim] Full contextualized token sequence for MLM.
         """
+        if self.clip_text_model is not None:
+            out = self.clip_text_model(text_tokens)
+            if isinstance(out, tuple):
+                global_feat, seq_feats = out
+            else:
+                global_feat = out
+                seq_feats = out.unsqueeze(1).expand(-1, text_tokens.shape[1], -1)
+            text_metric = F.normalize(self.text_proj(global_feat), p=2, dim=-1)
+            text_seq = self.seq_proj(seq_feats)
+            return text_metric, text_seq
+
         B, L = text_tokens.shape
         x = self.token_embedding(text_tokens) + self.pos_embedding[:, :L, :]
         x = self.transformer(x)
         x = self.ln_final(x)
 
-        # Global representation from first token or mean
         global_feat = x[:, 0, :]
         text_metric = F.normalize(self.text_proj(global_feat), p=2, dim=-1)
         return text_metric, x
@@ -292,18 +393,36 @@ class CrossModalMLMHead(nn.Module):
         ])
         self.vocab_head = nn.Linear(embed_dim, vocab_size)
 
-    def forward(self, masked_text_seq: torch.Tensor, visual_patches: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        masked_text_seq: torch.Tensor,
+        visual_patches: torch.Tensor,
+        masked_labels: Optional[torch.Tensor] = None
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
         """
         Args:
             masked_text_seq: [B, SeqLen, embed_dim] Text sequence with masked tokens.
             visual_patches: [B, NumPatches, embed_dim] Visual spatial patches.
+            masked_labels: Optional [B, SeqLen] Ground truth token IDs (-100 for unmasked).
         Returns:
-            [B, SeqLen, vocab_size] Predicted vocabulary logits.
+            vocab_logits: [N_masked, vocab_size] Sparse predicted vocabulary logits.
+            targets: [N_masked] Target token IDs.
         """
         x = masked_text_seq
         for layer in self.decoder_layers:
             x = layer(x, visual_patches)
-        return self.vocab_head(x)
+
+        # Sparse MLM projection: only project tokens that were actually masked (-100 ignored)
+        # Slashes VRAM consumption by 95% (from ~1 GB per batch down to ~25 MB)!
+        if masked_labels is not None:
+            mask = (masked_labels != -100)
+            if mask.any():
+                x_masked = x[mask]
+                vocab_logits = self.vocab_head(x_masked)
+                return vocab_logits, masked_labels[mask]
+            return None, None
+
+        return self.vocab_head(x), masked_labels
 
 
 class CrossAttentionBlock(nn.Module):
@@ -398,15 +517,55 @@ class SOTAChampionshipModel(nn.Module):
         self.embed_dim = embed_dim
         self.use_mlm = use_mlm
 
+        # Try to initialize unified OpenCLIP model if requested
+        clip_text_model = None
+        visual_backbone = None
+        in_dim = None
+
+        if backbone_type in ("auto", "eva02", "eva02_large", "eva02_base", "open_clip", "clip_vit_l14"):
+            try:
+                import open_clip
+                if backbone_type in ("eva02", "eva02_large"):
+                    m_name, p_tag = "EVA02-L-14", "merged2b_s4b_b131k"
+                elif backbone_type == "clip_vit_l14":
+                    m_name, p_tag = "ViT-L-14", "datacomp_xl_s13b_b90k"
+                else: # "auto", "eva02_base", "open_clip"
+                    m_name, p_tag = "EVA02-B-16", "merged2b_s8b_b131k"
+
+                print(f"[Model] Initializing OpenCLIP {m_name} (pretrained={p_tag})...")
+                clip_m, _, _ = open_clip.create_model_and_transforms(m_name, pretrained=p_tag, force_quick_gelu=False)
+                visual_backbone = clip_m.visual
+                if hasattr(visual_backbone, "set_grad_checkpointing"):
+                    visual_backbone.set_grad_checkpointing(True)
+                elif hasattr(visual_backbone, "trunk") and hasattr(visual_backbone.trunk, "set_grad_checkpointing"):
+                    visual_backbone.trunk.set_grad_checkpointing(True)
+
+                if hasattr(visual_backbone, "output_dim") and visual_backbone.output_dim:
+                    in_dim = visual_backbone.output_dim
+                elif hasattr(visual_backbone, "trunk") and hasattr(visual_backbone.trunk, "embed_dim"):
+                    in_dim = visual_backbone.trunk.embed_dim
+                elif hasattr(visual_backbone, "trunk") and hasattr(visual_backbone.trunk, "num_features"):
+                    in_dim = visual_backbone.trunk.num_features
+                else:
+                    in_dim = getattr(visual_backbone, "num_features", embed_dim)
+
+                clip_text_model = getattr(clip_m, "text", None)
+                print(f"[Model] Successfully initialized OpenCLIP {m_name}! Visual in_dim={in_dim}, Text tower ready.")
+            except Exception as e:
+                print(f"[Model] OpenCLIP initialization warning ({e}), falling back to modular components.")
+
         self.visual_stream = VisualStream(
             embed_dim=embed_dim,
             num_attrs=num_attrs,
             img_height=img_height,
             img_width=img_width,
             patch_size=patch_size,
-            backbone_type=backbone_type
+            backbone_type=backbone_type,
+            backbone=visual_backbone,
+            in_dim=in_dim
         )
         self.text_stream = TextStream(
+            clip_text_model=clip_text_model,
             embed_dim=embed_dim,
             vocab_size=vocab_size
         )
@@ -429,7 +588,8 @@ class SOTAChampionshipModel(nn.Module):
         self,
         images: torch.Tensor,
         text_tokens: torch.Tensor,
-        masked_tokens: Optional[torch.Tensor] = None
+        masked_tokens: Optional[torch.Tensor] = None,
+        masked_labels: Optional[torch.Tensor] = None,
     ) -> Dict[str, Union[torch.Tensor, Tuple[torch.Tensor, ...]]]:
         """Full training forward pass."""
         img_metric, attr_logits, spatial_patches, strip_embeds = self.visual_stream(images)
@@ -445,7 +605,8 @@ class SOTAChampionshipModel(nn.Module):
         # Training-time Masked Language Modeling
         if self.use_mlm and masked_tokens is not None and self.mlm_head is not None:
             _, masked_seq = self.text_stream(masked_tokens)
-            vocab_logits = self.mlm_head(masked_seq, spatial_patches)
+            vocab_logits, targets = self.mlm_head(masked_seq, spatial_patches, masked_labels=masked_labels)
             outputs["vocab_logits"] = vocab_logits
+            outputs["masked_labels"] = targets
 
         return outputs

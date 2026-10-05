@@ -145,9 +145,11 @@ class CrossModalMLMLoss(nn.Module):
     def forward(self, vocab_logits: torch.Tensor, masked_labels: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            vocab_logits: [B, SeqLen, VocabSize] Logits from cross-attention head.
-            masked_labels: [B, SeqLen] Ground truth word indices (-100 for non-masked).
+            vocab_logits: [B, SeqLen, VocabSize] or [N_masked, VocabSize] Logits from cross-attention head.
+            masked_labels: [B, SeqLen] or [N_masked] Ground truth word indices.
         """
+        if vocab_logits.dim() == 2 and masked_labels.dim() == 1:
+            return self.criterion(vocab_logits, masked_labels)
         logits_flat = vocab_logits.view(-1, vocab_logits.shape[-1])
         labels_flat = masked_labels.view(-1)
         return self.criterion(logits_flat, labels_flat)

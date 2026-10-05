@@ -29,81 +29,98 @@ from sota_pipeline.reranking import (
 )
 
 
-def compute_madm(
-    ranked_indices: np.ndarray,
-    gallery_labels: np.ndarray,
+def compute_official_metrics_from_ranking(
+    ranking: np.ndarray,
     query_labels: np.ndarray,
-    k_eval: int = 10
-) -> float:
-    """
-    Computes the official Mean Average Discrepancy Metric (mADM).
-    mADM = 1.0 - mean across queries of normalized attribute match discrepancy.
-    Higher is better (1.0 = perfect attribute alignment across top candidates).
-    """
-    Q, G = ranked_indices.shape
-    K = query_labels.shape[1]
-    discrepancies = []
-
-    for q in range(Q):
-        top_k_indices = ranked_indices[q, :k_eval]
-        q_vec = query_labels[q] # [40]
-
-        # Candidate attributes: [k_eval, 40]
-        cand_attrs = gallery_labels[top_k_indices]
-        # L1 distance per candidate normalized by number of attributes
-        l1_diff = np.abs(cand_attrs - q_vec).sum(axis=-1) / K # [k_eval]
-        discrepancies.append(np.mean(l1_diff))
-
-    mean_discrepancy = float(np.mean(discrepancies))
-    # mADM is bounded between 0.0 and 1.0 (inverted discrepancy score)
-    return max(0.0, 1.0 - mean_discrepancy)
-
-
-def compute_cmc_map(
-    ranked_indices: np.ndarray,
     gallery_labels: np.ndarray,
-    query_labels: np.ndarray,
-    match_threshold: int = 2
-) -> Tuple[float, float, float, float]:
+    match_threshold: int = 1
+) -> Dict[str, float]:
     """
-    Computes Rank-1, Rank-5, Rank-10, and mAP where positive match is defined
-    as Hamming attribute distance <= match_threshold.
+    Computes official WACV RWS Track 2 competition retrieval metrics:
+    - mADM: Mean Average Degree of Match (gallery-mean normalized ndom with rank weighting)
+    - mAP: Mean Average Precision over positive matches
+    - Rank-1, Rank-5, Rank-10: Cumulative Match Characteristic (CMC)
+    - mINP: Mean Inverse Negative Penalty
     """
-    Q, G = ranked_indices.shape
-    r1_count = 0
-    r5_count = 0
-    r10_count = 0
-    aps = []
+    Q, G = ranking.shape
+    queries = np.asarray(query_labels, dtype=np.float32)
+    gallery_gt = np.asarray(gallery_labels, dtype=np.float32)
 
-    for q in range(Q):
-        q_vec = query_labels[q]
-        cand_attrs = gallery_labels[ranked_indices[q]]
-        hamming_dists = np.abs(cand_attrs - q_vec).sum(axis=-1)
-        matches = (hamming_dists <= match_threshold)
+    # 1. Degree of Match (dom) between queries and gallery ground truth:
+    # ||q - y||_1 = sum(y) + q @ (1 - 2y).T
+    l1_diff = gallery_gt.sum(axis=1, keepdims=True).T + queries @ (1.0 - 2.0 * gallery_gt).T
+    l1_diff = np.maximum(0.0, l1_diff)
+    dom = 1.0 - (l1_diff / 40.0) # [Q, G] in [0.0, 1.0]
 
-        if matches[0]:
-            r1_count += 1
-        if np.any(matches[:5]):
-            r5_count += 1
-        if np.any(matches[:10]):
-            r10_count += 1
+    # Ground truth exact/positive matches (Hamming distance <= threshold)
+    exact_matches = (l1_diff <= match_threshold) # [Q, G] boolean
 
-        # Average Precision (AP)
-        num_pos = np.sum(matches)
-        if num_pos == 0:
-            aps.append(0.0)
-        else:
-            cum_matches = np.cumsum(matches)
-            ranks = np.arange(1, G + 1)
-            precision_at_k = cum_matches / ranks
-            ap = np.sum(precision_at_k * matches) / num_pos
-            aps.append(ap)
+    # 2. Normalized Degree of Match (ndom):
+    # An average random gallery image gets ndom = 0.0
+    mean_dom = dom.mean(axis=1, keepdims=True)
+    max_dom = dom.max(axis=1, keepdims=True)
+    denom = np.maximum(max_dom - mean_dom, 1e-8)
+    ndom = np.maximum(0.0, (dom - mean_dom) / denom)
 
-    rank1 = (r1_count / Q) * 100.0
-    rank5 = (r5_count / Q) * 100.0
-    rank10 = (r10_count / Q) * 100.0
-    map_score = float(np.mean(aps)) * 100.0
-    return rank1, rank5, rank10, map_score
+    ap_list = []
+    adm_list = []
+    inp_list = []
+    rank1_count = 0
+    rank5_count = 0
+    rank10_count = 0
+    valid_queries = 0
+
+    for i in range(Q):
+        q_order = ranking[i]
+        q_matches = exact_matches[i, q_order]
+        q_ndom = ndom[i, q_order]
+
+        ranks = np.where(q_matches)[0] + 1
+        R = len(ranks)
+
+        if R == 0:
+            # Fallback if no exact match found at threshold: take top-matching gallery candidate
+            best_idx = int(np.argmax(dom[i, q_order]))
+            ranks = np.array([best_idx + 1])
+            R = 1
+
+        valid_queries += 1
+
+        min_rank = ranks[0]
+        if min_rank <= 1:
+            rank1_count += 1
+        if min_rank <= 5:
+            rank5_count += 1
+        if min_rank <= 10:
+            rank10_count += 1
+
+        # Average Precision: AP = (1 / R) * sum_{k=1}^R (k / r_k)
+        precisions = np.arange(1, R + 1, dtype=np.float64) / ranks
+        ap_list.append(float(np.mean(precisions)))
+
+        # Inverse Negative Penalty: INP = R / r_R
+        inp_list.append(float(R / ranks[-1]))
+
+        # Average Degree of Match: ADM = (1 / R) * sum_{k=1}^R [ (sum_{j=1}^{r_k} ndom(j)) / r_k ]
+        cum_ndom = np.cumsum(q_ndom, dtype=np.float64)
+        adm_terms = cum_ndom[ranks - 1] / ranks
+        adm_list.append(float(np.mean(adm_terms)))
+
+    mADM = float(np.mean(adm_list)) if adm_list else 0.0
+    mAP = float(np.mean(ap_list)) * 100.0 if ap_list else 0.0
+    r1 = (rank1_count / max(valid_queries, 1)) * 100.0
+    r5 = (rank5_count / max(valid_queries, 1)) * 100.0
+    r10 = (rank10_count / max(valid_queries, 1)) * 100.0
+    mINP = float(np.mean(inp_list)) * 100.0 if inp_list else 0.0
+
+    return {
+        "mADM": mADM,
+        "mAP": mAP,
+        "Rank-1": r1,
+        "Rank-5": r5,
+        "Rank-10": r10,
+        "mINP": mINP,
+    }
 
 
 @torch.no_grad()
@@ -167,44 +184,46 @@ def evaluate_retrieval(
     sim_metric = torch.matmul(query_embeds, gallery_embeds.t()) # [Q, G]
     dist_metric = (1.0 - sim_metric).numpy()
     ranked_metric = np.argsort(dist_metric, axis=-1)
-
-    madm_metric = compute_madm(ranked_metric, gallery_labels, query_labels)
-    r1_m, r5_m, r10_m, map_m = compute_cmc_map(ranked_metric, gallery_labels, query_labels)
+    res_metric = compute_official_metrics_from_ranking(ranked_metric, query_labels, gallery_labels)
 
     # 2. Information-Weighted L1 Attribute Distance
     priors = gallery_labels.mean(axis=0)
     info_l1_engine = InformationWeightedL1(prior_frequencies=priors)
     dist_attr = info_l1_engine.compute_distance(query_labels, gallery_probs).numpy()
     ranked_attr = np.argsort(dist_attr, axis=-1)
-    madm_attr = compute_madm(ranked_attr, gallery_labels, query_labels)
+    res_attr = compute_official_metrics_from_ranking(ranked_attr, query_labels, gallery_labels)
 
     # 3. Reciprocal Rank Fusion (RRF)
     rrf_engine = ReciprocalRankFusion(k0=60, alpha=0.65)
     ranked_rrf = rrf_engine.fuse_ranks(dist_metric, dist_attr)
-    madm_rrf = compute_madm(ranked_rrf, gallery_labels, query_labels)
-    r1_rrf, r5_rrf, r10_rrf, map_rrf = compute_cmc_map(ranked_rrf, gallery_labels, query_labels)
+    res_rrf = compute_official_metrics_from_ranking(ranked_rrf, query_labels, gallery_labels)
 
     results = {
-        "mADM_Metric": float(madm_metric),
-        "Rank1_Metric": float(r1_m),
-        "Rank5_Metric": float(r5_m),
-        "Rank10_Metric": float(r10_m),
-        "mAP_Metric": float(map_m),
-        "mADM_Attr_L1": float(madm_attr),
-        "mADM_RRF": float(madm_rrf),
-        "Rank1_RRF": float(r1_rrf),
-        "Rank5_RRF": float(r5_rrf),
-        "Rank10_RRF": float(r10_rrf),
-        "mAP_RRF": float(map_rrf),
+        "mADM_Metric": res_metric["mADM"],
+        "Rank1_Metric": res_metric["Rank-1"],
+        "Rank5_Metric": res_metric["Rank-5"],
+        "Rank10_Metric": res_metric["Rank-10"],
+        "mAP_Metric": res_metric["mAP"],
+        "mADM_Attr_L1": res_attr["mADM"],
+        "mADM_RRF": res_rrf["mADM"],
+        "Rank1_RRF": res_rrf["Rank-1"],
+        "Rank5_RRF": res_rrf["Rank-5"],
+        "Rank10_RRF": res_rrf["Rank-10"],
+        "mAP_RRF": res_rrf["mAP"],
+        "mINP_RRF": res_rrf["mINP"],
     }
 
     print("\n" + "=" * 80)
-    print("SOTA EVALUATION RESULTS SUMMARY")
+    print("OFFICIAL COMPETITION EVALUATION RESULTS SUMMARY")
     print("=" * 80)
-    print(f"Continuous Metric (1024-D): mADM = {madm_metric:.4f} | R-1 = {r1_m:.2f}% | R-5 = {r5_m:.2f}% | mAP = {map_m:.2f}%")
-    print(f"Attribute Surprisal L1:    mADM = {madm_attr:.4f}")
-    print(f"Dual-Pathway RRF Fusion:   mADM = {madm_rrf:.4f} | R-1 = {r1_rrf:.2f}% | R-5 = {r5_rrf:.2f}% | mAP = {map_rrf:.2f}%")
+    print(f"Continuous Metric (1024-D): mADM = {res_metric['mADM']:.4f} | R-1 = {res_metric['Rank-1']:.2f}% | R-5 = {res_metric['Rank-5']:.2f}% | mAP = {res_metric['mAP']:.2f}%")
+    print(f"Attribute Surprisal L1:    mADM = {res_attr['mADM']:.4f} | R-1 = {res_attr['Rank-1']:.2f}% | mAP = {res_attr['mAP']:.2f}%")
+    print(f"Dual-Pathway RRF Fusion:   mADM = {res_rrf['mADM']:.4f} | R-1 = {res_rrf['Rank-1']:.2f}% | R-5 = {res_rrf['Rank-5']:.2f}% | mAP = {res_rrf['mAP']:.2f}% | mINP = {res_rrf['mINP']:.2f}%")
     print("=" * 80 + "\n")
+
+    # Flush GPU memory buffer after evaluation to prevent training OOM
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     return results
 
