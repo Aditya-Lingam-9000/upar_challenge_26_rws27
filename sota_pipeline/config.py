@@ -116,55 +116,65 @@ class SOTAConfig:
     @classmethod
     def resolve_dataset_root(cls, user_path: Optional[str] = None) -> str:
         """Autodetects dataset location across local workstation and Kaggle environments.
-        Prioritizes Rank 1 HDF5 binary container (.h5) for instant startup.
+        Dynamically scans /kaggle/input for any .h5 container or dataset directory.
         """
-        candidates = [
-            user_path,
-            os.environ.get("UPAR_DATA_ROOT"),
-            # Rank 1: HDF5 Binary Container (Kaggle & Local)
-            "/kaggle/input/upar-binary-dataset/upar_binary_dataset.h5",
-            "/kaggle/input/upar-binary-dataset",
-            "/kaggle/input/upar-hdf5-dataset/upar_binary_dataset.h5",
-            "/kaggle/input/upar-hdf5-dataset",
-            "/kaggle/input/upar-challenge-2027-h5/upar_binary_dataset.h5",
-            "/kaggle/input/upar-challenge-2027-h5",
+        # 1. Explicit user_path or environment variable
+        for explicit in [user_path, os.environ.get("UPAR_DATA_ROOT")]:
+            if explicit and os.path.exists(explicit):
+                if os.path.isfile(explicit):
+                    return os.path.abspath(explicit)
+                if os.path.isdir(explicit):
+                    for f in os.listdir(explicit):
+                        if f.endswith((".h5", ".hdf5")):
+                            return os.path.abspath(os.path.join(explicit, f))
+                    return os.path.abspath(explicit)
+
+        # 2. Dynamic Deep Scan of /kaggle/input (Handles ANY dataset slug or title)
+        kaggle_input = "/kaggle/input"
+        if os.path.isdir(kaggle_input):
+            # Phase A: Search for any .h5 / .hdf5 binary container (Rank 1)
+            for root, dirs, files in os.walk(kaggle_input):
+                for f in files:
+                    if f.endswith((".h5", ".hdf5")):
+                        found = os.path.abspath(os.path.join(root, f))
+                        print(f"[DATASET AUTO-RESOLVE] Found Rank 1 HDF5 container at: {found}")
+                        return found
+
+            # Phase B: Search for dataset_all.pkl or annotations/train.csv
+            for root, dirs, files in os.walk(kaggle_input):
+                if "dataset_all.pkl" in files:
+                    print(f"[DATASET AUTO-RESOLVE] Found dataset_all.pkl at: {root}")
+                    return os.path.abspath(root)
+                if "train.csv" in files:
+                    print(f"[DATASET AUTO-RESOLVE] Found train.csv at: {root}")
+                    if os.path.basename(root) == "annotations":
+                        return os.path.abspath(os.path.dirname(root))
+                    return os.path.abspath(root)
+
+            # Phase C: Search for surveillance image directories
+            for root, dirs, files in os.walk(kaggle_input):
+                if any(d in ["Market1501", "Market", "PA100k", "PETA", "UPAR"] for d in dirs):
+                    print(f"[DATASET AUTO-RESOLVE] Found surveillance directory at: {root}")
+                    return os.path.abspath(root)
+
+        # 3. Local workstation candidate search
+        local_candidates = [
             os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "upar_binary_dataset.h5")),
-            # Legacy Directories (Kaggle & Local)
-            "/kaggle/input/datasets/hinewk/upar-challenge-2027-data/data",
-            "/kaggle/input/upar-challenge-2027-data/data",
-            "/kaggle/input/upar-dataset/UPAR",
             os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "upar_dataset", "UPAR")),
             os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "RWS27_Data")),
         ]
-        for c in candidates:
-            if not c or not os.path.exists(c):
-                continue
+        for c in local_candidates:
+            if os.path.exists(c):
+                return c
 
-            # Case A: Explicit HDF5 file
-            if os.path.isfile(c) and c.endswith((".h5", ".hdf5")):
-                return os.path.abspath(c)
+        # 4. Informative Diagnostic Error
+        attached = []
+        if os.path.isdir(kaggle_input):
+            attached = os.listdir(kaggle_input)
 
-            # Case B: Directory containing an HDF5 file
-            if os.path.isdir(c):
-                default_h5 = os.path.join(c, "upar_binary_dataset.h5")
-                if os.path.isfile(default_h5):
-                    return os.path.abspath(default_h5)
-                for f in os.listdir(c):
-                    if f.endswith((".h5", ".hdf5")):
-                        return os.path.abspath(os.path.join(c, f))
-
-            # Case C: Legacy directory with dataset_all.pkl or Market folder
-            if os.path.isfile(os.path.join(c, "dataset_all.pkl")) or os.path.isdir(os.path.join(c, "Market")):
-                return os.path.abspath(c)
-            if os.path.isfile(c) and c.endswith(".pkl"):
-                return os.path.dirname(os.path.abspath(c))
-
-        # Default fallback
-        for c in candidates:
-            if c and os.path.exists(c):
-                return os.path.abspath(c)
-                
         raise FileNotFoundError(
-            "Could not automatically resolve UPAR dataset root. "
-            "Please specify via --dataset_root or set UPAR_DATA_ROOT environment variable."
+            f"Could not automatically resolve UPAR dataset root.\n"
+            f"Attached datasets currently in '/kaggle/input': {attached}\n"
+            f"Action Required: In the right-hand panel of your Kaggle notebook, click '+ Add Input' "
+            f"and attach your dataset (e.g. your newly uploaded 'upar-binary-dataset' or competition dataset)."
         )
