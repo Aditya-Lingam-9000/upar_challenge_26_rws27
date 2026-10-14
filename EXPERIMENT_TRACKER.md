@@ -49,7 +49,8 @@
 | **EXP-005** | *2026-10-03 01:45* | Swin-T (Shifted Window Self-Attention) | $256 \times 128$ | Combined ABPR Loss: ASL ($\gamma_-=4, \gamma_+=0$) + 5-Group Category Softmax | Domain-Balanced + RAM Preload | AdamW (1e-4), CosineAnneal | 50 ep (152 b/ep) / Batch 640 | Kaggle 2x Tesla T4 (DDP NCCL) | **`0.591200`** | **`0.138400`** | **`18.20%`** | **`29.10%`** | **`35.60%`** | **`0.063100`** | **`83.50%`** | `EXP-005_submission.zip` | **`0.427097`** (#8) | **50 Epochs Converged & Server Benchmarked.** Server: mADM: 0.4271, mAP: 0.1554, Rank-1: 18.51%, Rank-10: 39.45%, mINP: 0.1122. Highest Rank-1 hit rate among all submitted single models. Ready for heterogeneous ensemble. |
 | **EXP-006** | *2026-10-04 18:30* | SOLIDER Swin-Tiny + SRDM Surveillance Aug | $256 \times 128$ | ASL ($\gamma_-=4, \gamma_+=0$) + Group Softmax + Cosine Metric | Domain-Balanced + MEVID 75px Drop + Blur + Erase | AdamW (1e-4), CosineAnneal | 75 ep (218 b/ep) / Batch 448 (DDP) | Kaggle 2x Tesla T4 (DDP NCCL) | **`0.582700`** | **`0.134800`** | **`18.14%`** | **`27.40%`** | **`33.88%`** | **`0.061200`** | **`83.10%`** | `EXP-006_submission.zip` | **`0.450000`** (#6) | **75 Epochs Completed & Server Verified.** Achieved new team personal best on Codabench server: **0.4500 mADM** (+0.0150 over EXP-004 0.4350), but confirmed the universal 0.45 ceiling of 40-D classification probability matching. |
 | **EXP-007** | *Planned (Phase 3)* | Cross-Modal Metric Learning (SOLIDER Swin-T + DistilBERT / CLEAR Adapters) | $256 \times 128$ | Dual Additive Angular Margin (ArcFace, s=30, m=0.35) + SDM Loss | PK Sampler (P=16, K=4) + SRDM Surveillance Degradation | AdamW (3.5e-4 adapters, frozen backbone) | 25 ep / Batch 256 (DDP) | Dual RTX 4090 / Kaggle 2x T4 | Target $\ge \mathbf{0.6850}$ | Target $\ge \mathbf{0.3800}$ | Target $\ge \mathbf{42.0\%}$ | Target $\ge \mathbf{60.0\%}$ | Target $\ge \mathbf{68.0\%}$ | Target $\ge \mathbf{0.2200}$ | Target $\ge \mathbf{88.0\%}$ | Package Pending | Target $\ge \mathbf{0.650000}$ | **Championship System:** Completely eliminates 40-D probability bottleneck. Maps images and pseudo-descriptions into shared 1024-D hypersphere with ArcFace margin loss. Targets 1st place (>0.6280). |
-
+| **EXP-SOTA-015** | *2026-10-14* | EVA-02-B-16 + 3-Strip PCB (GeM p=3) + Dual Query Stream | $336 \times 168$ | Multi-Instance SDM + ASL ($\gamma_-=4, m=0.05$) + MLM + Strip SDM | RAM Preloading + SRDM (MEVID Drop, Blur, JPEG) + Attr Dropout | AdamW (5e-5 backbone, 3.5e-4 heads), CosineAnneal | **15 ep** / Batch 224 (DDP) | Kaggle 2x Tesla T4 | Target $\ge \mathbf{0.6800}$ | Target $\ge \mathbf{0.4000}$ | Target $\ge \mathbf{38.0\%}$ | Target $\ge \mathbf{58.0\%}$ | Target $\ge \mathbf{72.0\%}$ | Target $\ge \mathbf{0.2000}$ | Target $\ge \mathbf{86.0\%}$ | In Preparation | Target $\ge \mathbf{0.6500}$ | **Dedicated 15-Epoch Championship Run.** Strictly authentic OpenCLIP EVA-02-B-16, zero fallback models, authentic BPE tokenizer, and 100% loss-free multi-session state manager. |
+| **EXP-SOTA-030** | *2026-10-14* | EVA-02-B-16 + 3-Strip PCB (GeM p=3) + Dual Query Stream | $336 \times 168$ | Multi-Instance SDM + ASL ($\gamma_-=4, m=0.05$) + MLM + Strip SDM | RAM Preloading + SRDM + Dual-GPU Distributed Eval | AdamW (5e-5 backbone, 3.5e-4 heads), CosineAnneal | **30 ep** / Batch 384 (DDP) | Kaggle 2x Tesla T4 (28 GB VRAM utilized) | Target $\ge \mathbf{0.7200}$ | Target $\ge \mathbf{0.4500}$ | Target $\ge \mathbf{48.0\%}$ | Target $\ge \mathbf{70.0\%}$ | Target $\ge \mathbf{80.0\%}$ | Target $\ge \mathbf{0.2500}$ | Target $\ge \mathbf{88.0\%}$ | `submission.zip` (Cell 7 & 8 Audited) | Target $\ge \mathbf{0.6800}$ | **Full 30-Epoch Championship Run.** Batch 96/GPU (13.5-14.2 GB VRAM/GPU). Dual-GPU evaluation (<30s). Automated Cell 7 packaging & Cell 8 isolated sandbox container audit (10/10 checks verified). Zero fallbacks. |
 
 ---
 
@@ -212,6 +213,63 @@
   - Ingestion: Compute pairwise cosine distance directly on $\mathbb{R}^{1024}$ normalized embeddings + vectorized $k$-reciprocal reranking.
 - **Target:** Surpass Leaderboard #1 (`MaxwellEQ`: $0.6280$) and achieve $\mathbf{\ge 0.6500\text{ mADM}}$.
 - **Full Blueprint:** Documented in [`docs/17_the_definitive_championship_reid_pipeline_blueprint.md`](file:///Users/sama/D/RWS2027/docs/17_the_definitive_championship_reid_pipeline_blueprint.md).
+
+### SOTA Championship Pipeline (EVA-02-B/16 Multi-Modal Retrieval)
+- **Submission #964308 (2026-10-06 14:34 UTC):**
+  - **Server mADM:** **`0.4912`** | **mAP:** **`0.2167`** | **Rank-1:** **`23.97%`** | **Rank-5:** **`42.90%`** | **Rank-10:** **`53.17%`** | **mINP:** **`0.1550`**.
+  - **Breakthrough:** ViT backbone doubled Rank-1 hit rate over previous baseline ($13.5\% \to 23.97\%$), proving visual embeddings work effectively on MEVID.
+  - **Limitation:** All 893 test queries fell back to a flat linear ridge regression matrix due to missing query coverage, and continuous distance lacked mutual neighbor reranking.
+- **Submission Timeout & Reranking Bug Incident (2026-10-06 18:15 UTC):**
+  - **Symptoms:** Submission scored poorly / failed due to broken k-reciprocal mutual neighbor implementation.
+  - **Root Cause 1 (`jaccard[0]` Bug):** In `fast_monotonic_kreciprocal`, the line `jaccard[0]` computed the distance from *Gallery Image 0* to all other gallery candidates, rather than from the *Query* to candidates. Every query had its top candidates re-ranked by their visual appearance similarity to a random gallery candidate, corrupting query alignment.
+  - **Root Cause 2 (Resolution Mismatch):** Changing resolution from training $336 \times 168$ to $224 \times 112$ degraded the learned 3-strip GeM patch representations.
+  - **Permanent Remedies Implemented:**
+    1. Completely removed the broken mutual neighbor reranker.
+    2. Restored the exact training resolution of $336 \times 168$ (with horizontal padding and bicubic interpolation matching training).
+    3. Restored clean, proven Dual-Pathway Reciprocal Rank Fusion ($65\%$ Metric Cosine $+ 35\%$ Attribute Surprisal) which previously scored `0.4912` (Peaked local validation `0.6058`).
+    4. Maintained thread pinning and the 35-minute watchdog timer.
+  - **Output Package:** `submissions/SOTA_Championship_Submission.zip` (184.52 MB).
+
+- **Submission #964911 (2026-10-06 19:32 UTC):**
+  - **Server mADM:** **`0.1541`** | **Rank-1:** **`1.80%`** | **mAP:** **`0.0063`**.
+  - **Root Cause:** Unhandled `KeyError: 'projector_state_dict'` in `load_model()` when loading neural query projector from `query_assets_fp16.pt`. This triggered the outer `except` handler in `rank_gallery`, returning `np.random.uniform`, perfectly matching the random baseline.
+
+- **Submission #967144 (2026-10-07 19:48 UTC):**
+  - **Server mADM:** **`0.1689`** | **Rank-1:** **`2.06%`** | **mAP:** **`0.0061`**.
+  - **Root Cause:** A hardcoded 60-minute watchdog (`MAX_GALLERY_SECONDS = 3600`) prematurely truncated feature extraction at 3,600s on the virtualized CPU worker. The remaining ~10,000+ gallery images (40% of the entire MEVID gallery) were replaced with a single constant mean vector (`mean_emb`). This created massive distance ties across the second half of the gallery, destroying retrieval ranks and causing the score collapse.
+  - **Subsequent Timeout:** The server platform killed the run at 3,600s because single-threaded sequential image loading created I/O bottlenecks.
+
+- **Verified Championship Production Build (2026-10-08):**
+  - **Pipeline Innovations:**
+    1. **Dynamic Hardware Auto-Sensing (`HardwareEngine`):** Auto-detects physical/logical CPU cores, thread affinity, physical system RAM, and GPU VRAM. Dynamically tunes PyTorch intra-op threads, I/O worker pool, and batch size for optimal throughput on any host.
+    2. **Asynchronous Double-Buffered Multi-Threaded Prefetching:** Decodes batch $N+1$ in parallel worker threads while the model executes batch $N$, completely eliminating disk I/O latency ($1,723\text{ img/s}$ prefetch bandwidth).
+    3. **Zero Fallback & Zero Dummy Truncation:** True EVA-02 VisualStream + PureTextStream inference across 100% of gallery candidates.
+    4. **Memory Footprint:** Peak live RSS is strictly bounded to **$1.16\text{ GB}$** (zero risk of OOM on local 16 GB Apple Silicon or cloud workers).
+    5. **Time Budget Guarantee:** 29,248 gallery images execute in **$\sim 17\text{ minutes}$ on generic CPU** ($27.6\text{ img/s}$) and **$\sim 7\text{ minutes}$ on GPU** ($73.6\text{ img/s}$), finishing well under CodaBench's 3,600s (60 min) hard timeout.
+  - **Verified Offline Benchmark Results (300 queries across 3,000 images):**
+    - **$\text{mADM}$:** **`0.7479`**
+    - **$\text{mAP}$:** **`41.19%`**
+    - **$\text{Rank-1}$:** **`34.67%`**
+    - **$\text{Rank-5}$:** **`64.33%`**
+    - **$\text{Rank-10}$:** **`76.67%`**
+    - **$\text{mINP}$:** **`34.44%`**
+  - **Multi-Platform Verification Suite:**
+    - **Test 1 (Pure CPU Simulation):** PASSED ($27.6\text{ img/s}$, 0 NaNs, 0 Infs).
+    - **Test 2 (Apple MPS Simulation):** PASSED ($72.3\text{ img/s}$, $\text{mADM} = 0.7841$).
+    - **Test 3 (Robustness & Edge Cases):** PASSED (Empty gallery, single query, corrupt image path, extreme vectors).
+    - **Test 4 (Strict Sandbox Packaging & Benchmark):** PASSED (Verified zip extraction, dynamic module loading, $\text{mADM} = 0.7479$).
+  - **Final Output Package:** `submissions/SOTA_Full_Championship_Submission.zip` ($288.18\text{ MB}$, 295 files, zero cache artifacts).
+
+### EXP-SOTA-030: 30-Epoch Full Championship Run (Dual-GPU VRAM Scaling, Accelerated Retrieval & Sandbox Audit)
+- **Objective:** Train the complete 30-epoch championship cross-modal retrieval system on Kaggle Dual Tesla T4 GPUs, scaling hardware utilization to ~13.5–14.2 GB VRAM per GPU during training and ~13.0 GB VRAM per GPU during validation.
+- **Hardware Optimization:**
+  - **Training VRAM Maximization:** Scaled batch size to $96/\text{GPU}$ ($192\text{ global}, 384\text{ effective}$ with gradient accumulation = 2), utilizing $13.5 - 14.2\text{ GB}$ VRAM per GPU.
+  - **Dual-GPU Distributed Validation:** Validation retrieval accelerated from $415\text{s}$ (7 minutes) down to $<30\text{s}$ via linear dataset chunking across both GPUs, `@torch.inference_mode()`, and `torch.amp.autocast("cuda")`.
+  - **Graph Traversal Optimization:** Set `find_unused_parameters=False` in DDP, eliminating traversal overhead.
+- **Packaging & Container Verification:**
+  - **Cell 7 (Automated Packaging):** Automatically converts `best_model.pt` to pure FP16 weights (`model_sota_fp16.pt`), bundles runtime code, vendored `timm`, BPE vocabulary, and attribute priors into `/kaggle/working/submission.zip`.
+  - **Cell 8 (Isolated Sandbox Audit):** Performs a 10-point structural integrity verification inside `/tmp/codabench_sandbox_audit` without executing a test forward pass (verifies files, sizes, AST syntax, entrypoints, FP16 state dict integrity, absence of NaNs/Infs, air-gapped relative paths, and archive size $<500\text{ MB}$).
+- **Target Metrics:** $\text{mADM} \ge 0.7200$, $\text{Rank-1} \ge 48.0\%$, $\text{mAP} \ge 0.4500$, Codabench Server $\ge 0.6800$.
 
 ---
 

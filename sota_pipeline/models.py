@@ -103,21 +103,17 @@ class VisualStream(nn.Module):
         )
 
     def _initialize_backbone(self, backbone_type: str) -> Tuple[nn.Module, int]:
-        """Loads SOTA pretrained Vision Transformer with explicit error logging."""
-        # 1. Try open_clip EVA-02 / ViT-L
+        """Loads SOTA pretrained Vision Transformer. Fallbacks are strictly prohibited."""
         if backbone_type in ("auto", "eva02", "eva02_large", "eva02_base", "open_clip", "clip_vit_l14"):
             try:
                 import open_clip
                 if backbone_type in ("eva02", "eva02_large"):
                     model_name = "EVA02-L-14"
                     pretrained = "merged2b_s4b_b131k"
-                elif backbone_type == "eva02_base":
-                    model_name = "EVA02-B-16"
-                    pretrained = "merged2b_s8b_b131k"
                 elif backbone_type == "clip_vit_l14":
                     model_name = "ViT-L-14"
                     pretrained = "datacomp_xl_s13b_b90k"
-                else: # "auto" or "open_clip"
+                else:  # "auto", "eva02_base", "open_clip"
                     model_name = "EVA02-B-16"
                     pretrained = "merged2b_s8b_b131k"
 
@@ -139,33 +135,15 @@ class VisualStream(nn.Module):
                 else:
                     in_dim = getattr(visual, "num_features", self.embed_dim)
 
-                print(f"[VisualStream] Successfully loaded open_clip {model_name} (in_dim={in_dim}, grad_checkpointing=True)!")
+                print(f"[VisualStream] Successfully loaded authentic open_clip {model_name} (in_dim={in_dim}, grad_checkpointing=True)!")
                 return visual, in_dim
             except Exception as e:
-                print(f"[VisualStream] WARNING: Failed to load open_clip backbone: {e}")
+                raise RuntimeError(
+                    f"[VisualStream] CRITICAL: Failed to load required open_clip backbone '{model_name}': {e}. "
+                    f"Fallbacks are strictly prohibited per championship specification."
+                ) from e
 
-        # 2. Try torchvision Vision Transformer (ViT-B/16 or ViT-L/16)
-        try:
-            import torchvision.models as tv_models
-            vit = tv_models.vit_b_16(weights=tv_models.ViT_B_16_Weights.IMAGENET1K_V1)
-            in_features = vit.heads.head.in_features
-            vit.heads = nn.Identity()
-            print("[VisualStream] Loaded torchvision ViT-B/16 backbone.")
-            return vit, in_features
-        except Exception as e:
-            print(f"[VisualStream] WARNING: Failed to load torchvision ViT-B/16: {e}")
-
-        # 3. Built-in Standalone Vision Transformer (Self-Contained Fallback)
-        print("[VisualStream] Initializing standalone Vision Transformer encoder.")
-        fallback = StandaloneViT(
-            img_height=self.img_height,
-            img_width=self.img_width,
-            patch_size=self.patch_size,
-            embed_dim=self.embed_dim,
-            num_layers=12,
-            num_heads=16
-        )
-        return fallback, self.embed_dim
+        raise ValueError(f"[VisualStream] Unsupported backbone_type '{backbone_type}'. Fallbacks are strictly prohibited.")
 
     def forward(self, images: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
         """
@@ -332,36 +310,20 @@ class TextStream(nn.Module):
         self.max_length = max_length
         self.clip_text_model = clip_text_model
 
-        if clip_text_model is not None:
-            if hasattr(clip_text_model, "output_tokens"):
-                clip_text_model.output_tokens = True
-            in_dim = getattr(clip_text_model, "output_dim", None) or getattr(clip_text_model, "width", 512)
-            self.text_proj = nn.Sequential(
-                nn.Linear(in_dim, embed_dim),
-                nn.LayerNorm(embed_dim)
+        if clip_text_model is None:
+            raise RuntimeError(
+                "[TextStream] CRITICAL: Pretrained clip_text_model is strictly required. "
+                "Untrained random text fallbacks are prohibited per championship specification."
             )
-            self.seq_proj = nn.Identity() if in_dim == embed_dim else nn.Linear(in_dim, embed_dim)
-        else:
-            self.token_embedding = nn.Embedding(vocab_size, embed_dim)
-            self.pos_embedding = nn.Parameter(torch.randn(1, max_length, embed_dim) * 0.02)
 
-            encoder_layer = nn.TransformerEncoderLayer(
-                d_model=embed_dim,
-                nhead=16,
-                dim_feedforward=embed_dim * 4,
-                dropout=0.10,
-                activation="gelu",
-                batch_first=True,
-                norm_first=True
-            )
-            self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=8)
-            self.ln_final = nn.LayerNorm(embed_dim)
-
-            self.text_proj = nn.Sequential(
-                nn.Linear(embed_dim, embed_dim),
-                nn.LayerNorm(embed_dim)
-            )
-            self.seq_proj = nn.Identity()
+        if hasattr(clip_text_model, "output_tokens"):
+            clip_text_model.output_tokens = True
+        in_dim = getattr(clip_text_model, "output_dim", None) or getattr(clip_text_model, "width", 512)
+        self.text_proj = nn.Sequential(
+            nn.Linear(in_dim, embed_dim),
+            nn.LayerNorm(embed_dim)
+        )
+        self.seq_proj = nn.Identity() if in_dim == embed_dim else nn.Linear(in_dim, embed_dim)
 
     def forward(self, text_tokens: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -371,25 +333,15 @@ class TextStream(nn.Module):
             text_metric: [B, embed_dim] L2-normalized metric text embedding.
             text_seq: [B, SeqLen, embed_dim] Full contextualized token sequence for MLM.
         """
-        if self.clip_text_model is not None:
-            out = self.clip_text_model(text_tokens)
-            if isinstance(out, tuple):
-                global_feat, seq_feats = out
-            else:
-                global_feat = out
-                seq_feats = out.unsqueeze(1).expand(-1, text_tokens.shape[1], -1)
-            text_metric = F.normalize(self.text_proj(global_feat), p=2, dim=-1)
-            text_seq = self.seq_proj(seq_feats)
-            return text_metric, text_seq
-
-        B, L = text_tokens.shape
-        x = self.token_embedding(text_tokens) + self.pos_embedding[:, :L, :]
-        x = self.transformer(x)
-        x = self.ln_final(x)
-
-        global_feat = x[:, 0, :]
+        out = self.clip_text_model(text_tokens)
+        if isinstance(out, tuple):
+            global_feat, seq_feats = out
+        else:
+            global_feat = out
+            seq_feats = out.unsqueeze(1).expand(-1, text_tokens.shape[1], -1)
         text_metric = F.normalize(self.text_proj(global_feat), p=2, dim=-1)
-        return text_metric, x
+        text_seq = self.seq_proj(seq_feats)
+        return text_metric, text_seq
 
 
 class CrossModalMLMHead(nn.Module):
@@ -470,49 +422,11 @@ class CrossAttentionBlock(nn.Module):
         return x
 
 
-class StandaloneViT(nn.Module):
-    """Self-contained Vision Transformer for 100% zero-dependency execution."""
-
-    def __init__(
-        self,
-        img_height: int = 336,
-        img_width: int = 168,
-        patch_size: int = 14,
-        embed_dim: int = 1024,
-        num_layers: int = 12,
-        num_heads: int = 16
-    ):
-        super().__init__()
-        self.patch_embed = nn.Conv2d(3, embed_dim, kernel_size=patch_size, stride=patch_size)
-        num_patches = (img_height // patch_size) * (img_width // patch_size)
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.pos_embed = nn.Parameter(torch.randn(1, num_patches + 1, embed_dim) * 0.02)
-
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=embed_dim,
-            nhead=num_heads,
-            dim_feedforward=embed_dim * 4,
-            dropout=0.10,
-            activation="gelu",
-            batch_first=True,
-            norm_first=True
-        )
-        self.blocks = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        self.ln = nn.LayerNorm(embed_dim)
-
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        B = x.shape[0]
-        patches = self.patch_embed(x).flatten(2).transpose(1, 2)
-        cls_tokens = self.cls_token.expand(B, -1, -1)
-        tokens = torch.cat([cls_tokens, patches], dim=1) + self.pos_embed
-        tokens = self.ln(self.blocks(tokens))
-        return tokens[:, 0, :], tokens[:, 1:, :]
-
-
 class SOTAChampionshipModel(nn.Module):
     """
     Master Unconstrained SOTA Architecture for >= 0.9000 Local mADM.
     Unites VisualStream (with 3-Strip PCB), TextStream, Auxiliary Head, and MLM Head.
+    Strictly uses authentic pretrained foundation models; fallbacks are strictly prohibited.
     """
 
     def __init__(
@@ -530,7 +444,7 @@ class SOTAChampionshipModel(nn.Module):
         self.embed_dim = embed_dim
         self.use_mlm = use_mlm
 
-        # Try to initialize unified OpenCLIP model if requested
+        # Initialize authentic unified OpenCLIP model
         clip_text_model = None
         visual_backbone = None
         in_dim = None
@@ -542,10 +456,10 @@ class SOTAChampionshipModel(nn.Module):
                     m_name, p_tag = "EVA02-L-14", "merged2b_s4b_b131k"
                 elif backbone_type == "clip_vit_l14":
                     m_name, p_tag = "ViT-L-14", "datacomp_xl_s13b_b90k"
-                else: # "auto", "eva02_base", "open_clip"
+                else:  # "auto", "eva02_base", "open_clip"
                     m_name, p_tag = "EVA02-B-16", "merged2b_s8b_b131k"
 
-                print(f"[Model] Initializing OpenCLIP {m_name} (pretrained={p_tag})...")
+                print(f"[Model] Initializing authentic OpenCLIP {m_name} (pretrained={p_tag})...")
                 clip_m, _, _ = open_clip.create_model_and_transforms(m_name, pretrained=p_tag, force_quick_gelu=False)
                 visual_backbone = clip_m.visual
                 if hasattr(visual_backbone, "set_grad_checkpointing"):
@@ -572,9 +486,19 @@ class SOTAChampionshipModel(nn.Module):
                     in_dim = getattr(visual_backbone, "num_features", embed_dim)
 
                 clip_text_model = getattr(clip_m, "text", None)
-                print(f"[Model] Successfully initialized OpenCLIP {m_name}! Visual in_dim={in_dim}, Text tower ready.")
+                print(f"[Model] Successfully initialized authentic OpenCLIP {m_name}! Visual in_dim={in_dim}, Text tower ready.")
             except Exception as e:
-                print(f"[Model] OpenCLIP initialization warning ({e}), falling back to modular components.")
+                raise RuntimeError(
+                    f"[Model] CRITICAL ERROR: Failed to initialize authentic OpenCLIP '{m_name}' ({p_tag}): {e}. "
+                    f"Silent fallbacks are strictly prohibited per championship specification."
+                ) from e
+
+        if visual_backbone is None or clip_text_model is None:
+            raise RuntimeError(
+                f"[Model] CRITICAL ERROR: Failed to load required authentic OpenCLIP models for '{backbone_type}'. "
+                f"Visual backbone: {visual_backbone is not None}, Text model: {clip_text_model is not None}. "
+                f"Silent fallbacks are strictly prohibited."
+            )
 
         self.visual_stream = VisualStream(
             embed_dim=embed_dim,

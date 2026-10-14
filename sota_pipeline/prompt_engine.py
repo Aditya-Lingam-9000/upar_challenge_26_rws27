@@ -109,24 +109,15 @@ class DynamicPromptEngine:
         self._clip_tokenizer = self._initialize_tokenizer()
 
     def _initialize_tokenizer(self):
-        """Attempts to load official CLIP or open_clip tokenizer; falls back gracefully."""
-        # 1. Try open_clip
+        """Loads official authentic open_clip tokenizer. Fallbacks are strictly prohibited."""
         try:
             import open_clip
-            return ("open_clip", open_clip.tokenize)
-        except Exception:
-            pass
-
-        # 2. Try transformers
-        try:
-            from transformers import AutoTokenizer
-            tok = AutoTokenizer.from_pretrained("openai/clip-vit-large-patch14", local_files_only=False)
-            return ("transformers", tok)
-        except Exception:
-            pass
-
-        # 3. Use built-in deterministic tokenizer
-        return ("builtin", None)
+            return open_clip.tokenize
+        except Exception as e:
+            raise RuntimeError(
+                f"[DynamicPromptEngine] CRITICAL: Failed to load authentic open_clip.tokenize: {e}. "
+                "Fallbacks are strictly prohibited per championship specification."
+            ) from e
 
     def synthesize_prompt(
         self,
@@ -175,57 +166,15 @@ class DynamicPromptEngine:
         return prefix + ", ".join(phrases) + "."
 
     def tokenize(self, text_or_list: Union[str, List[str]]) -> torch.Tensor:
-        """Tokenizes text string or batch of text into a [B, max_length] tensor."""
+        """Tokenizes text string or batch of text into a [B, max_length] tensor using authentic BPE."""
         if isinstance(text_or_list, str):
             text_or_list = [text_or_list]
 
-        backend, tok_fn = self._clip_tokenizer
-
-        if backend == "open_clip":
-            try:
-                tokens = tok_fn(text_or_list)
-                if tokens.shape[-1] != self.max_length:
-                    # Pad or truncate to self.max_length
-                    if tokens.shape[-1] < self.max_length:
-                        pad = torch.zeros((tokens.shape[0], self.max_length - tokens.shape[-1]), dtype=tokens.dtype)
-                        tokens = torch.cat([tokens, pad], dim=-1)
-                    else:
-                        tokens = tokens[:, :self.max_length]
-                return tokens
-            except Exception:
-                pass
-
-        elif backend == "transformers":
-            try:
-                encoded = tok_fn(
-                    text_or_list,
-                    padding="max_length",
-                    truncation=True,
-                    max_length=self.max_length,
-                    return_tensors="pt"
-                )
-                return encoded["input_ids"]
-            except Exception:
-                pass
-
-        # Built-in Fallback Tokenizer
-        batch_tokens = []
-        sos_id = WORD2IDX["<SOS>"]
-        eos_id = WORD2IDX["<EOS>"]
-        pad_id = WORD2IDX["<PAD>"]
-        unk_id = WORD2IDX["<UNK>"]
-
-        for text in text_or_list:
-            cleaned = text.lower().replace(".", "").replace(",", "").replace("-", " ")
-            words = cleaned.split()
-            tokens = [sos_id]
-            for w in words:
-                tokens.append(WORD2IDX.get(w, unk_id))
-            tokens.append(eos_id)
-            if len(tokens) < self.max_length:
-                tokens.extend([pad_id] * (self.max_length - len(tokens)))
+        tokens = self._clip_tokenizer(text_or_list)
+        if tokens.shape[-1] != self.max_length:
+            if tokens.shape[-1] < self.max_length:
+                pad = torch.zeros((tokens.shape[0], self.max_length - tokens.shape[-1]), dtype=tokens.dtype)
+                tokens = torch.cat([tokens, pad], dim=-1)
             else:
-                tokens = tokens[:self.max_length - 1] + [eos_id]
-            batch_tokens.append(tokens)
-
-        return torch.tensor(batch_tokens, dtype=torch.long)
+                tokens = tokens[:, :self.max_length]
+        return tokens

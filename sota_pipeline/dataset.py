@@ -167,6 +167,7 @@ class SOTAUPARDataset(Dataset):
             self.samples = self.samples[:max_samples]
             self.labels = self.labels[:max_samples]
 
+        self.attr_labels = self.labels
         self.num_samples = len(self.samples)
         src_desc = f"HDF5: {os.path.basename(self.h5_path)}" if self.is_h5 else "Directory"
         print(f"[{split.upper()}] Initialized dataset with {self.num_samples:,} samples ({src_desc}).")
@@ -190,6 +191,34 @@ class SOTAUPARDataset(Dataset):
                     for n in raw_names
                 ]
             return samples, labels.astype(np.float32)
+
+        # Check annotations CSV (e.g. UPAR-Challenge-2027/data/annotations/val.csv or train.csv)
+        csv_candidates = [
+            os.path.join(self.dataset_root, "annotations", f"{self.split}.csv"),
+            os.path.join(self.dataset_root, f"{self.split}.csv"),
+            os.path.join(os.path.dirname(self.dataset_root), "annotations", f"{self.split}.csv"),
+            os.path.join(self.dataset_root, "annotations", "task1", f"{self.split}", "gt.csv"),
+            os.path.join(self.dataset_root, "annotations", "task2", f"{self.split}", "gt.csv"),
+        ]
+        for csv_path in csv_candidates:
+            if os.path.isfile(csv_path):
+                import csv
+                samples = []
+                labels_list = []
+                with open(csv_path, "r", encoding="utf-8") as f:
+                    reader = csv.reader(f)
+                    header = next(reader)
+                    for row in reader:
+                        if not row or len(row) < 41:
+                            continue
+                        rel_path = row[0].lstrip("# ").strip()
+                        img_path = os.path.join(self.dataset_root, rel_path)
+                        if not os.path.isfile(img_path):
+                            img_path = os.path.join(os.path.dirname(self.dataset_root), rel_path)
+                        samples.append(img_path)
+                        labels_list.append([float(x) for x in row[1:41]])
+                print(f"[Dataset] Successfully loaded {len(samples):,} samples from {csv_path}")
+                return samples, np.asarray(labels_list, dtype=np.float32)
 
         pkl_path = os.path.join(self.dataset_root, "dataset_all.pkl")
         if not os.path.isfile(pkl_path):
@@ -225,7 +254,7 @@ class SOTAUPARDataset(Dataset):
             return samples, np.asarray(labels_list, dtype=np.float32)
 
         # Fallback: scan directory structure
-        print(f"[Dataset] dataset_all.pkl not found at {pkl_path}. Scanning directory...")
+        print(f"[Dataset] Neither CSV nor dataset_all.pkl found. Scanning directory...")
         samples = []
         labels_list = []
         for root, _, files in os.walk(self.dataset_root):

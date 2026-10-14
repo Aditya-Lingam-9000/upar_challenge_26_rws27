@@ -91,7 +91,7 @@ def main():
     parser.add_argument("--output_dir", type=str, default="sota_outputs")
     parser.add_argument("--checkpoint_dir", type=str, default="checkpoints_sota")
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint .pt to resume from")
-    parser.add_argument("--epochs", type=int, default=10, help="Number of epochs to train")
+    parser.add_argument("--epochs", type=int, default=30, help="Number of epochs to train")
     parser.add_argument("--batch_size", type=int, default=64, help="Per-GPU batch size")
     parser.add_argument("--accumulation_steps", type=int, default=2, help="Gradient accumulation steps")
     parser.add_argument("--backbone_lr", type=float, default=5e-5)
@@ -142,16 +142,14 @@ def main():
         drop_last=True
     )
 
-    val_dataset = None
-    if is_master:
-        val_dataset = SOTAUPARDataset(
-            dataset_root=dataset_root,
-            split="val",
-            img_height=cfg.img_height,
-            img_width=cfg.img_width,
-            use_srdm=False,
-            preload_to_ram=True
-        )
+    val_dataset = SOTAUPARDataset(
+        dataset_root=dataset_root,
+        split="val",
+        img_height=cfg.img_height,
+        img_width=cfg.img_width,
+        use_srdm=False,
+        preload_to_ram=True
+    )
 
     # 2. Model & Distributed Wrapping
     model = SOTAChampionshipModel(
@@ -165,7 +163,7 @@ def main():
     model.to(device)
 
     if world_size > 1:
-        model = DDP(model, device_ids=[local_rank] if torch.cuda.is_available() else None, find_unused_parameters=True)
+        model = DDP(model, device_ids=[local_rank] if torch.cuda.is_available() else None, find_unused_parameters=False)
 
     # 3. Optimizer & Schedulers
     param_groups = build_parameter_groups(model, args.backbone_lr, args.adapter_lr, cfg.weight_decay)
@@ -250,10 +248,11 @@ def main():
         )
 
     # Optional Epoch 0 Baseline Zero-Shot Validation
-    if start_epoch == 1 and args.run_baseline and is_master and val_dataset is not None:
-        print("\n" + "=" * 80)
-        print("[BASELINE] Running Initial Pretrained Zero-Shot Validation (Epoch 0 Baseline)...")
-        print("=" * 80)
+    if start_epoch == 1 and args.run_baseline and val_dataset is not None:
+        if is_master:
+            print("\n" + "=" * 80)
+            print("[BASELINE] Running Initial Pretrained Zero-Shot Validation (Epoch 0 Baseline)...")
+            print("=" * 80)
         val_model = model.module if hasattr(model, "module") else model
         base_results = evaluate_retrieval(
             model=val_model,
@@ -262,8 +261,9 @@ def main():
             num_queries=min(args.val_queries, len(val_dataset)),
             device=device
         )
-        best_val_madm = base_results.get("mADM_RRF", 0.0)
-        print(f"[BASELINE] Pretrained Zero-Shot Established: mADM = {best_val_madm:.4f}\n")
+        if is_master:
+            best_val_madm = base_results.get("mADM_RRF", 0.0)
+            print(f"[BASELINE] Pretrained Zero-Shot Established: mADM = {best_val_madm:.4f}\n")
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
@@ -364,8 +364,9 @@ def main():
             print(f"\n[TRAIN] Epoch {epoch:02d}/{total_epochs:02d} Completed. Mean Multi-Task Loss: {avg_loss:.4f}\n")
 
         # 7. Validation Evaluation After Every Epoch
-        if is_master and val_dataset is not None and (epoch % args.eval_every == 0 or epoch == total_epochs):
-            print(f"[VAL] Running Full Validation Retrieval for Epoch {epoch:02d}...")
+        if val_dataset is not None and (epoch % args.eval_every == 0 or epoch == total_epochs):
+            if is_master:
+                print(f"[VAL] Running Full Distributed Validation Retrieval for Epoch {epoch:02d}...")
             val_model = model.module if hasattr(model, "module") else model
             val_results = evaluate_retrieval(
                 model=val_model,
@@ -374,26 +375,28 @@ def main():
                 num_queries=min(args.val_queries, len(val_dataset)),
                 device=device
             )
-            curr_madm = val_results.get("mADM_RRF", 0.0)
+            curr_madm = val_results.get("mADM_RRF", 0.0) if is_master else 0.0
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            is_best = (curr_madm > best_val_madm)
-            if is_best:
-                best_val_madm = curr_madm
-                print(f"[CHECKPOINT] >>> New Historical Best Validation mADM: {best_val_madm:.4f}! <<<")
 
-            # Strictly maintain ONLY best_model.pt and last_checkpoint.pt
-            resumable_mgr.save_checkpoint(
-                epoch=epoch,
-                global_step=global_step,
-                model=model,
-                optimizer=optimizer,
-                scheduler=scheduler,
-                scaler=scaler,
-                best_metric=best_val_madm,
-                is_best=is_best,
-                filename="last_checkpoint.pt"
-            )
+            if is_master:
+                is_best = (curr_madm > best_val_madm)
+                if is_best:
+                    best_val_madm = curr_madm
+                    print(f"[CHECKPOINT] >>> New Historical Best Validation mADM: {best_val_madm:.4f}! <<<")
+
+                # Strictly maintain ONLY best_model.pt and last_checkpoint.pt
+                resumable_mgr.save_checkpoint(
+                    epoch=epoch,
+                    global_step=global_step,
+                    model=model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    scaler=scaler,
+                    best_metric=best_val_madm,
+                    is_best=is_best,
+                    filename="last_checkpoint.pt"
+                )
 
         # 8. Multi-Session Wall-Clock Timeout Check
         if resumable_mgr.should_exit_for_timeout():

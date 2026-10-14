@@ -87,8 +87,8 @@ class SOTAConfig:
     # ---------------------------------------------------------
     # Optimization & Multi-Session Schedule
     # ---------------------------------------------------------
-    epochs: int = 70
-    warmup_epochs: int = 5
+    epochs: int = 30
+    warmup_epochs: int = 3
     batch_size: int = 32          # Per-GPU batch size (64 global on Dual T4, 256 effective with accum=4)
     gradient_accumulation_steps: int = 4
     

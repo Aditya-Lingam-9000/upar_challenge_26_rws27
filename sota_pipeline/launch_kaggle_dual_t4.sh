@@ -40,8 +40,10 @@ torchrun --nproc_per_node=2 \
          sota_pipeline/train.py \
          --dataset_root "$DATASET_ROOT" \
          --checkpoint_dir "$CHECKPOINT_DIR" \
-         --batch_size 64 \
-         --epochs 70 \
+         --batch_size 96 \
+         --accumulation_steps 2 \
+         --epochs 30 \
+         --eval_batch_size 384 \
          --backbone_lr 5e-5 \
          --adapter_lr 3.5e-4 \
          --min_lr 1e-6 \
