@@ -142,6 +142,15 @@ def evaluate_retrieval(
     raw_model = model.module if hasattr(model, "module") else model
     raw_model.eval()
 
+    import gc
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        if hasattr(torch.cuda, "ipc_collect"):
+            torch.cuda.ipc_collect()
+        if getattr(device, "type", "") == "cuda":
+            torch.cuda.synchronize(device)
+
     is_distributed = dist.is_initialized() and dist.get_world_size() > 1
     rank = dist.get_rank() if is_distributed else 0
     world_size = dist.get_world_size() if is_distributed else 1
@@ -277,8 +286,15 @@ def evaluate_retrieval(
     if is_distributed:
         dist.barrier()
 
+    # Explicitly release evaluation tensors and flush VRAM
+    del val_loader, local_dataset, gal_features, all_gal_features, attr_logits_list, all_attr_logits
+    gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+        if hasattr(torch.cuda, "ipc_collect"):
+            torch.cuda.ipc_collect()
+        if getattr(device, "type", "") == "cuda":
+            torch.cuda.synchronize(device)
 
     return results
 

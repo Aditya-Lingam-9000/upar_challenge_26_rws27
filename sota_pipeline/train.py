@@ -59,6 +59,22 @@ def cleanup_distributed():
         dist.destroy_process_group()
 
 
+def clear_gpu_vram(device: torch.device = None, stage: str = ""):
+    """
+    Strictly clears and resets host RAM and GPU VRAM across all available devices.
+    Invokes Python garbage collection, CUDA empty_cache, IPC collect, and device synchronization.
+    """
+    import gc
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        if hasattr(torch.cuda, "ipc_collect"):
+            torch.cuda.ipc_collect()
+        if device is not None and getattr(device, "type", "") == "cuda":
+            torch.cuda.synchronize(device)
+
+
+
 def build_parameter_groups(model: nn.Module, backbone_lr: float, adapter_lr: float, weight_decay: float):
     """Separates pretrained visual backbone parameters from newly initialized heads."""
     raw_model = model.module if hasattr(model, "module") else model
@@ -249,6 +265,7 @@ def main():
 
     # Optional Epoch 0 Baseline Zero-Shot Validation
     if start_epoch == 1 and args.run_baseline and val_dataset is not None:
+        clear_gpu_vram(device, "Pre-Baseline Zero-Shot")
         if is_master:
             print("\n" + "=" * 80)
             print("[BASELINE] Running Initial Pretrained Zero-Shot Validation (Epoch 0 Baseline)...")
@@ -264,11 +281,11 @@ def main():
         if is_master:
             best_val_madm = base_results.get("mADM_RRF", 0.0)
             print(f"[BASELINE] Pretrained Zero-Shot Established: mADM = {best_val_madm:.4f}\n")
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        clear_gpu_vram(device, "Post-Baseline Zero-Shot")
 
     # 6. Main Optimization Loop
     for epoch in range(start_epoch, total_epochs + 1):
+        clear_gpu_vram(device, f"Pre-Train Epoch {epoch:02d}")
         if train_sampler is not None:
             train_sampler.set_epoch(epoch)
 
@@ -365,6 +382,7 @@ def main():
 
         # 7. Validation Evaluation After Every Epoch
         if val_dataset is not None and (epoch % args.eval_every == 0 or epoch == total_epochs):
+            clear_gpu_vram(device, f"Pre-Val Epoch {epoch:02d}")
             if is_master:
                 print(f"[VAL] Running Full Distributed Validation Retrieval for Epoch {epoch:02d}...")
             val_model = model.module if hasattr(model, "module") else model
@@ -376,8 +394,7 @@ def main():
                 device=device
             )
             curr_madm = val_results.get("mADM_RRF", 0.0) if is_master else 0.0
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            clear_gpu_vram(device, f"Post-Val Epoch {epoch:02d}")
 
             if is_master:
                 is_best = (curr_madm > best_val_madm)

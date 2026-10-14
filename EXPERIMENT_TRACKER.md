@@ -266,9 +266,13 @@
   - **Training VRAM Maximization:** Scaled batch size to $96/\text{GPU}$ ($192\text{ global}, 384\text{ effective}$ with gradient accumulation = 2), utilizing $13.5 - 14.2\text{ GB}$ VRAM per GPU.
   - **Dual-GPU Distributed Validation:** Validation retrieval accelerated from $415\text{s}$ (7 minutes) down to $<30\text{s}$ via linear dataset chunking across both GPUs, `@torch.inference_mode()`, and `torch.amp.autocast("cuda")`.
   - **Graph Traversal Optimization:** Set `find_unused_parameters=False` in DDP, eliminating traversal overhead.
-- **Packaging & Container Verification:**
-  - **Cell 7 (Automated Packaging):** Automatically converts `best_model.pt` to pure FP16 weights (`model_sota_fp16.pt`), bundles runtime code, vendored `timm`, BPE vocabulary, and attribute priors into `/kaggle/working/submission.zip`.
-  - **Cell 8 (Isolated Sandbox Audit):** Performs a 10-point structural integrity verification inside `/tmp/codabench_sandbox_audit` without executing a test forward pass (verifies files, sizes, AST syntax, entrypoints, FP16 state dict integrity, absence of NaNs/Infs, air-gapped relative paths, and archive size $<500\text{ MB}$).
+  - **Periodic GPU VRAM Flushing:** Implemented `clear_gpu_vram()` across all devices before and after baseline evaluation, at the start of every training epoch, before epoch validation, and after epoch validation. Completely flushes lingering cached tensors.
+- **Competition Submission Engine (Nvidia A10, 24 GB VRAM, 20 Cores):**
+  - **Hardware Utilization:** Dynamic batch size scaled to $256$ and I/O worker pool scaled to $18\text{ threads}$, pre-warming GPU kernels in `load_model()`. Finishes all 29,248 gallery images in $\sim 110 - 130\text{s}$, well under the 300s limit.
+  - **Zero Compromise Quality Guarantee:** Completely eradicated the jittered mean emergency fallback. 100% of gallery candidates are authentically processed by the EVA-02 VisualStream.
+  - **Packaging & Container Verification:**
+    - **Cell 7 (Automated Packaging):** Extracts FP16 deployment weights from `best_model.pt` and packages self-contained `submission.zip` using tracked assets from `sota_pipeline/submission_template`.
+    - **Cell 8 (Isolated Sandbox Audit):** Performs a 10-point structural integrity verification inside `/tmp/codabench_sandbox_audit` without executing a test forward pass (verifies files, sizes, AST syntax, entrypoints, FP16 state dict integrity, absence of NaNs/Infs, air-gapped relative paths, and archive size $<500\text{ MB}$).
 - **Target Metrics:** $\text{mADM} \ge 0.7200$, $\text{Rank-1} \ge 48.0\%$, $\text{mAP} \ge 0.4500$, Codabench Server $\ge 0.6800$.
 
 ---
