@@ -224,6 +224,15 @@ def evaluate_retrieval(
     gallery_probs = torch.sigmoid(gallery_logits).numpy()
     G = gallery_embeds.shape[0]
 
+    # Free intermediate GPU tensor buffers immediately
+    del gallery_embeds_list, gallery_logits_list, gallery_labels_list
+    del local_embeds, local_logits, local_labels
+    if is_distributed:
+        del gathered_embeds, gathered_logits, gathered_labels
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     # Only master rank computes metric retrieval & logs
     results = {}
     if is_master:
@@ -286,8 +295,11 @@ def evaluate_retrieval(
     if is_distributed:
         dist.barrier()
 
-    # Explicitly release evaluation tensors and flush VRAM
-    del val_loader, local_dataset, gal_features, all_gal_features, attr_logits_list, all_attr_logits
+    # Explicitly release evaluation loaders and flush VRAM
+    try:
+        del val_loader, local_dataset
+    except Exception:
+        pass
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
