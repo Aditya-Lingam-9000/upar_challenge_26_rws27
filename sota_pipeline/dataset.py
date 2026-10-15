@@ -365,3 +365,14 @@ class SOTAUPARDataset(Dataset):
             "strip_tokens": (tok_head, tok_torso, tok_legs),
             "sample_idx": idx,
         }
+
+    def get_all_labels(self) -> np.ndarray:
+        """Returns all 40-D attribute labels as a float32 numpy array."""
+        return np.asarray(self.labels, dtype=np.float32)
+
+    def get_query_subset(self, num_queries: int = 500) -> np.ndarray:
+        """Deterministically samples a subset of queries from the dataset labels."""
+        all_labels = self.get_all_labels()
+        Q = min(num_queries, len(all_labels))
+        indices = np.linspace(0, len(all_labels) - 1, Q, dtype=int)
+        return all_labels[indices]

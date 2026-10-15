@@ -324,8 +324,17 @@ def main():
     )
 
     # Validation Query & Ground Truth preparation
-    val_queries_raw = val_dataset.get_query_subset(num_queries=args.val_queries)
-    val_gallery_gt = val_dataset.get_all_labels()
+    if hasattr(val_dataset, "get_all_labels"):
+        val_gallery_gt = val_dataset.get_all_labels()
+    else:
+        val_gallery_gt = np.asarray(getattr(val_dataset, "labels", getattr(val_dataset, "attr_labels")), dtype=np.float32)
+
+    if hasattr(val_dataset, "get_query_subset"):
+        val_queries_raw = val_dataset.get_query_subset(num_queries=args.val_queries)
+    else:
+        Q = min(args.val_queries, len(val_gallery_gt))
+        indices = np.linspace(0, len(val_gallery_gt) - 1, Q, dtype=int)
+        val_queries_raw = val_gallery_gt[indices]
 
     best_madm = 0.0
 
