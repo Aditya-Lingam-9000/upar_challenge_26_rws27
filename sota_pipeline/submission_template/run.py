@@ -858,45 +858,31 @@ def rank_gallery(sample: Dict[str, Any]) -> Dict[str, Any]:
     gal_embeds = gal_embeds / g_norms
 
     # -----------------------------------------------------------------
-    # Step 3: Compute Pairwise Distances
+    # Step 3: Compute Dual Continuous Hyperspherical Distances
     # -----------------------------------------------------------------
-    # Stream 1: Continuous 1024-D Metric Cosine Distance
-    cos_sim = np.dot(q_embeds, gal_embeds.T)  # [Q, G]
-    dist_metric = 1.0 - cos_sim
+    # Stream 1: Continuous 1024-D Deep Vision-Language Metric Distance (EVA-02)
+    cos_sim_metric = np.dot(q_embeds, gal_embeds.T)  # [Q, G]
+    dist_metric = 1.0 - cos_sim_metric
 
-    # Stream 2: Information-Weighted Pedestrian Attribute Surprisal Distance
-    priors = _PRIORS if _PRIORS is not None else np.ones(40, dtype=np.float32) * 0.12
-    weights = -np.log2(np.clip(priors, 1e-4, 1.0 - 1e-4))
-    weights = weights / weights.sum()
-
-    W = np.diag(weights)
-    weighted_p = np.dot(gal_probs, W)
-    term1 = weighted_p.sum(axis=1, keepdims=True).T
-    term2 = np.dot(queries_raw, (weights - 2.0 * weighted_p).T)
-    dist_attr = term1 + term2
+    # Stream 2: Continuous 40-D Attribute Probability Cosine Distance
+    # Measures directional alignment between target binary attributes and predicted probabilities
+    p_norms = np.linalg.norm(gal_probs, axis=1, keepdims=True) + 1e-8
+    q_p_norms = np.linalg.norm(queries_raw, axis=1, keepdims=True) + 1e-8
+    cos_sim_prob = np.dot(queries_raw / q_p_norms, (gal_probs / p_norms).T)  # [Q, G]
+    dist_prob = 1.0 - cos_sim_prob
 
     # -----------------------------------------------------------------
-    # Step 4: Dual-Pathway Reciprocal Rank Fusion (RRF)
+    # Step 4: Symmetric Normalized Dual-Stream Fusion
     # -----------------------------------------------------------------
-    k0 = 60
-    alpha = 0.65  # 65% True Continuous Metric, 35% Attribute Surprisal
+    # Normalize each continuous distance matrix to [0.0, 1.0] dynamically
+    d_m_min, d_m_max = dist_metric.min(), dist_metric.max()
+    d_p_min, d_p_max = dist_prob.min(), dist_prob.max()
+    d_m_norm = (dist_metric - d_m_min) / max(1e-8, d_m_max - d_m_min)
+    d_p_norm = (dist_prob - d_p_min) / max(1e-8, d_p_max - d_p_min)
 
-    ranked_m = np.argsort(dist_metric, axis=1)  # [Q, G]
-    ranked_a = np.argsort(dist_attr, axis=1)    # [Q, G]
-
-    rrf_score = np.zeros((Q, G), dtype=np.float32)
-    rank_order = np.arange(G, dtype=np.float32)
-
-    for q in range(Q):
-        inv_m = np.empty(G, dtype=np.float32)
-        inv_a = np.empty(G, dtype=np.float32)
-        inv_m[ranked_m[q]] = rank_order
-        inv_a[ranked_a[q]] = rank_order
-        rrf_score[q] = (alpha / (k0 + inv_m)) + ((1.0 - alpha) / (k0 + inv_a))
-
-    # Convert RRF score to distance (ascending sort in Codabench -> lowest distance first)
-    distances = -rrf_score
-    distances = np.nan_to_num(distances, nan=0.0, posinf=0.0, neginf=-1.0).astype(np.float32)
+    # 50/50 Balanced Dual-Stream Fusion: combines deep appearance with explicit semantic alignment
+    distances = 0.50 * d_m_norm + 0.50 * d_p_norm
+    distances = np.nan_to_num(distances, nan=0.0, posinf=1.0, neginf=0.0).astype(np.float32)
 
     elapsed = time.time() - t0
     print(f"[RETRIEVAL] Successfully computed distance matrix ({distances.shape}) in {elapsed:.2f}s!", flush=True)
