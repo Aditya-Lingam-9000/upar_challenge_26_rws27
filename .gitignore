@@ -40,6 +40,7 @@ submissions/
 *.log
 train.log
 scratch/
+results/
 .system_generated/
 wandb/
 .pytest_cache/

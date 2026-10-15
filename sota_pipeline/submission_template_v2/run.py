@@ -678,10 +678,17 @@ def prefetch_batches(
     num_batches = (total_images + batch_size - 1) // batch_size
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, num_workers))
 
+    def _extract_path(item: Any) -> str:
+        if isinstance(item, str):
+            return item
+        if isinstance(item, dict):
+            return item.get("image_path", item.get("path", item.get("image_name", item.get("file_name", ""))))
+        return ""
+
     def _submit(b_idx: int):
         s = b_idx * batch_size
         e = min(s + batch_size, total_images)
-        paths = [gallery[i].get("image_path", "") for i in range(s, e)]
+        paths = [_extract_path(gallery[i]) for i in range(s, e)]
         futures = [executor.submit(_load_single_image, p) for p in paths]
         return s, e, futures
 
@@ -707,20 +714,46 @@ def prefetch_batches(
 # 6. Official Codabench Retrieval Entrypoint
 # =====================================================================
 @torch.inference_mode()
-def rank_gallery(sample: Dict[str, Any]) -> Dict[str, Any]:
+def rank_gallery(
+    sample_or_queries: Union[Dict[str, Any], Any],
+    gallery_arg: Optional[Any] = None
+) -> Union[Dict[str, Any], np.ndarray]:
     t0 = time.time()
 
     if _VISUAL_MODEL is None or _TEXT_MODEL is None:
         load_model()
 
-    gallery = sample.get("gallery", sample.get("gallery_images", []))
-    queries_raw = np.asarray(sample.get("queries", []), dtype=np.float32)
+    is_sample_dict = isinstance(sample_or_queries, dict) and gallery_arg is None
+    if is_sample_dict:
+        sample = sample_or_queries
+        gallery = sample.get("gallery", sample.get("gallery_images", []))
+        q_input = sample.get("queries", sample.get("query_attributes", []))
+    else:
+        q_input = sample_or_queries
+        gallery = gallery_arg if gallery_arg is not None else []
+
+    if isinstance(q_input, list) and len(q_input) > 0 and isinstance(q_input[0], dict):
+        q_list = []
+        for q in q_input:
+            vec = q.get("attribute_vector", q.get("attributes", q.get("query_attributes", None)))
+            if vec is not None:
+                q_list.append(vec)
+            else:
+                q_list.append(q)
+        queries_raw = np.asarray(q_list, dtype=np.float32)
+    else:
+        queries_raw = np.asarray(q_input, dtype=np.float32)
+
+    if queries_raw.ndim == 1:
+        queries_raw = queries_raw.reshape(1, -1)
+
     G = len(gallery)
     Q = len(queries_raw)
 
     print(f"[RETRIEVAL] Processing {Q:,} queries across {G:,} gallery candidates on {_DEVICE}...", flush=True)
     if G == 0 or Q == 0:
-        return {"distances": np.zeros((Q, G), dtype=np.float32)}
+        empty_res = np.zeros((Q, G), dtype=np.float32)
+        return {"distances": empty_res} if is_sample_dict else empty_res
 
     # Step 1: Batched Gallery Feature Extraction
     gc.collect()
@@ -803,7 +836,9 @@ def rank_gallery(sample: Dict[str, Any]) -> Dict[str, Any]:
 
     elapsed = time.time() - t0
     print(f"[RETRIEVAL] Successfully computed distance matrix ({distances.shape}) in {elapsed:.2f}s!", flush=True)
-    return {"distances": distances}
+    if is_sample_dict:
+        return {"distances": distances}
+    return distances
 
 
 if __name__ == "__main__":
