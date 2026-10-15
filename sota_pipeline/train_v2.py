@@ -287,9 +287,23 @@ def main():
         ckpt = torch.load(args.warmstart_checkpoint, map_location="cpu")
         state_dict = ckpt.get("model_state_dict", ckpt)
         # Load visual stream weights
-        vis_sd = {k.replace("visual_stream.", ""): v for k, v in state_dict.items() if "visual_stream." in k}
+        vis_sd = {}
+        for k, v in state_dict.items():
+            if not k.startswith("visual_stream."):
+                continue
+            new_k = k.replace("visual_stream.", "")
+            if new_k.startswith("backbone.trunk."):
+                new_k = new_k.replace("backbone.trunk.", "backbone.")
+            vis_sd[new_k] = v
+
         if not vis_sd:
-            vis_sd = {k: v for k, v in state_dict.items() if not k.startswith("text_") and not k.startswith("hard_") and not k.startswith("soft_")}
+            for k, v in state_dict.items():
+                if not k.startswith("text_") and not k.startswith("hard_") and not k.startswith("soft_"):
+                    new_k = k
+                    if new_k.startswith("backbone.trunk."):
+                        new_k = new_k.replace("backbone.trunk.", "backbone.")
+                    vis_sd[new_k] = v
+
         load_res = model.visual_stream.load_state_dict(vis_sd, strict=False)
         start_stage = 2
         if accelerator.is_main_process:
