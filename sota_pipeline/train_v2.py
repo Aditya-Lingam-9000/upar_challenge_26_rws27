@@ -372,11 +372,14 @@ def main():
 
         for step, batch in enumerate(train_loader):
             images = batch["image"]
-            attr_targets = batch["attributes"].float()
+            attr_targets = (batch["attr_labels"] if "attr_labels" in batch else batch["attributes"]).float()
 
             # Dynamic linguistic prompt synthesis
-            prompts = [prompt_engine.synthesize_prompt(attr_targets[i], is_train=True) for i in range(len(images))]
-            text_tokens = prompt_engine.tokenize(prompts).to(accelerator.device)
+            if "text_tokens" in batch and batch["text_tokens"] is not None:
+                text_tokens = batch["text_tokens"].to(accelerator.device)
+            else:
+                prompts = [prompt_engine.synthesize_prompt(attr_targets[i], is_train=True) for i in range(len(images))]
+                text_tokens = prompt_engine.tokenize(prompts).to(accelerator.device)
 
             with accelerator.accumulate(model):
                 outputs = model(

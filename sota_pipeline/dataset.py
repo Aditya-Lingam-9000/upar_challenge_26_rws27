@@ -359,6 +359,7 @@ class SOTAUPARDataset(Dataset):
         return {
             "image": img_tensor,
             "attr_labels": torch.from_numpy(attr_vec),
+            "attributes": torch.from_numpy(attr_vec),
             "text_tokens": tokens,
             "masked_tokens": masked_tokens,
             "masked_labels": masked_labels,
