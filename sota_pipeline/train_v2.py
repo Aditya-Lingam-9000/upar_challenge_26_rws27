@@ -287,10 +287,14 @@ def main():
         ckpt = torch.load(args.warmstart_checkpoint, map_location="cpu")
         state_dict = ckpt.get("model_state_dict", ckpt)
         # Load visual stream weights
-        model.visual_stream.load_state_dict(state_dict, strict=False)
+        vis_sd = {k.replace("visual_stream.", ""): v for k, v in state_dict.items() if "visual_stream." in k}
+        if not vis_sd:
+            vis_sd = {k: v for k, v in state_dict.items() if not k.startswith("text_") and not k.startswith("hard_") and not k.startswith("soft_")}
+        load_res = model.visual_stream.load_state_dict(vis_sd, strict=False)
         start_stage = 2
         if accelerator.is_main_process:
-            print("[WARMSTART] Visual backbone weights successfully loaded! Skipping to Stage 2...")
+            print(f"[WARMSTART] Loaded {len(vis_sd)} visual tensors! Missing: {len(load_res.missing_keys)}, Unexpected: {len(load_res.unexpected_keys)}")
+            print("[WARMSTART] Visual backbone weights successfully loaded! Skipping directly to Stage 2 ArcFace...")
 
     # Stage 2 Setup: Freeze backbone
     if start_stage == 2:
