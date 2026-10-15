@@ -17,7 +17,7 @@ UPAR-Challenge-2027/
 upar_dataset/
 upar_challenge_2024/
 c2t_net_upar/
-data/
+/data/
 *.zip
 *.tar
 *.tar.gz
