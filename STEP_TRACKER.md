@@ -1420,6 +1420,22 @@
 
 ---
 
+### Step 56: Enforcement of Pure Scratch Retraining Policy & Warmstart Purge
+- **Date / Timestamp:** 2026-10-16
+- **What Was Done:**
+  - Audited [`notebooks/sota_v3_championship_dual_t4.ipynb`](file:///Users/sama/D/RWS2027/notebooks/sota_v3_championship_dual_t4.ipynb) and [`sota_pipeline/train_v3.py`](file:///Users/sama/D/RWS2027/sota_pipeline/train_v3.py).
+  - Completely excised all warmstart checkpoint candidate scanning (`best_model.pt`, `checkpoints_sota_v2/best_model.pt`, `/kaggle/input/.../model_sota_fp16.pt`) and the `--warmstart_checkpoint` flag.
+  - Enforced 100% pure scratch training: the foundation ViT backbone (`eva02_base_patch16_clip_224`) loads clean authentic pretrained vision weights, and all surgical modules (`ConvPass`, `DeformableMultiHeadAttention`, `FourierTransformerDGLayer`, `AnatomicalGaussianCrossAttention`, `ContinuousAttributePrompter`, `LorentzHyperbolicHead`) are freshly initialized from scratch.
+  - Verified syntax of all 8 notebook cells with Python AST (all valid).
+  - Executed local dry run of `train_v3.py` verifying clean start-from-scratch initialization and execution with exit code 0.
+- **What Changed / Created:**
+  - Modified [`notebooks/sota_v3_championship_dual_t4.ipynb`](file:///Users/sama/D/RWS2027/notebooks/sota_v3_championship_dual_t4.ipynb) (Cell 3 and Cell 5 updated to pure scratch training).
+  - Modified [`sota_pipeline/train_v3.py`](file:///Users/sama/D/RWS2027/sota_pipeline/train_v3.py) (removed `warmstart_checkpoint` argument and loading block).
+- **Why It Changed / Rationale:**
+  - Carrying over weights from SOTA V1 or V2 would contaminate the new model with discrete ArcFace cluster quantization artifacts and rigid body partitions that caused the 0.5279 server drop. SOTA V3 must train entirely from scratch to establish continuous manifold alignment and flat loss minima.
+
+---
+
 ## Next Steps Roadmap
 1. **Launch SOTA V3 Training on Kaggle:** Upload and execute [`notebooks/sota_v3_championship_dual_t4.ipynb`](file:///Users/sama/D/RWS2027/notebooks/sota_v3_championship_dual_t4.ipynb) on Kaggle Dual Tesla T4 GPUs.
 2. **Download & Submit to CodaBench Track 2:** Retrieve the resulting `/kaggle/working/submission_sota_v3.zip` and upload to CodaBench Competition #18196 to take 1st Place.

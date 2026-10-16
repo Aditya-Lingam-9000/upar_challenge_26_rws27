@@ -218,7 +218,6 @@ def train_sota_v3(
     weight_decay: float = 1e-4,
     checkpoint_dir: str = "checkpoints_sota_v3",
     output_dir: str = "sota_v3_outputs",
-    warmstart_checkpoint: Optional[str] = None,
     eval_every: int = 1,
     val_queries_count: int = 500,
     eval_batch_size: int = 256,
@@ -304,20 +303,14 @@ def train_sota_v3(
         enable_hyperbolic=True,
     )
 
-    # Warmstart if checkpoint provided
-    if warmstart_checkpoint and os.path.isfile(warmstart_checkpoint):
-        if accelerator.is_main_process:
-            print(f"[WARMSTART] Loading weights from {warmstart_checkpoint}...")
-        ckpt = torch.load(warmstart_checkpoint, map_location="cpu", weights_only=False)
-        state_dict = ckpt.get("model_state_dict", ckpt)
-        # Adapt keys
-        clean_sd = {}
-        for k, v in state_dict.items():
-            k_clean = k.replace("module.", "")
-            clean_sd[k_clean] = v
-        missing, unexpected = model.load_state_dict(clean_sd, strict=False)
-        if accelerator.is_main_process:
-            print(f"[WARMSTART] Loaded weights! Missing: {len(missing)}, Unexpected: {len(unexpected)}")
+    # Pure Scratch Initialization Policy:
+    # Zero warmstart from previous V1/V2 checkpoints.
+    # Foundation ViT trunk loads authentic pretrained weights; all surgical modules are freshly initialized.
+    if accelerator.is_main_process:
+        print("[SOTA-V3] Initialization Mode: PURE SCRATCH TRAINING")
+        print("  - Foundation ViT trunk: Pretrained weights loaded cleanly")
+        print("  - Surgical Modules: ConvPass, DMHA, PCNorm, AGCA, Hyperbolic Head freshly initialized from scratch")
+        print("  - Zero weight transfer or leakage from previous V1/V2 checkpoints")
 
     # 3. Layer-Wise Optimizer Partitioning (LLRD)
     # Trunk gets trunk_lr; newly inserted surgical components get surgical_lr (10x higher)
@@ -493,7 +486,6 @@ if __name__ == "__main__":
     parser.add_argument("--surgical_lr", type=float, default=2.5e-4)
     parser.add_argument("--checkpoint_dir", type=str, default="checkpoints_sota_v3")
     parser.add_argument("--output_dir", type=str, default="sota_v3_outputs")
-    parser.add_argument("--warmstart_checkpoint", type=str, default=None)
     parser.add_argument("--eval_every", type=int, default=1)
     parser.add_argument("--max_samples", type=int, default=None)
     parser.add_argument("--pretrained", action="store_true", default=True)
@@ -509,7 +501,6 @@ if __name__ == "__main__":
         surgical_lr=args.surgical_lr,
         checkpoint_dir=args.checkpoint_dir,
         output_dir=args.output_dir,
-        warmstart_checkpoint=args.warmstart_checkpoint,
         eval_every=args.eval_every,
         max_samples=args.max_samples,
         pretrained=args.pretrained,
