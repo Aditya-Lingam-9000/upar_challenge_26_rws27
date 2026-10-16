@@ -380,7 +380,14 @@ class LookASAM(Optimizer):
             self.zero_grad()
 
     def step(self, closure=None):
-        raise NotImplementedError("Use LookASAM with explicit first_step and second_step calls.")
+        """Standard PyTorch optimizer step with optional SAM closure support."""
+        if closure is not None:
+            self.first_step(zero_grad=True)
+            with torch.enable_grad():
+                loss = closure()
+            self.second_step()
+            return loss
+        return self.base_optimizer.step()
 
 
 # =====================================================================

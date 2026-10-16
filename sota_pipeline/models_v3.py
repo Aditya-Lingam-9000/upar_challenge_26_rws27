@@ -165,7 +165,7 @@ class DeformableMultiHeadAttention(nn.Module):
         nn.init.zeros_(self.offset_net[-1].weight)
         nn.init.zeros_(self.offset_net[-1].bias)
 
-        # Zero-initialized blending weight for seamless warmstart
+        # Zero-initialized blending weight for exact identity preservation at t=0
         self.alpha = nn.Parameter(torch.zeros(1))
 
     def _generate_reference_grid(self, H: int, W: int, device: torch.device) -> torch.Tensor:
