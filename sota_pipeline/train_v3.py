@@ -224,6 +224,8 @@ def train_sota_v3(
     seed: int = 42,
     max_samples: Optional[int] = None,
     pretrained: bool = True,
+    resume_from: Optional[str] = None,
+    initial_curriculum_progress: float = 0.0,
 ):
     """Master SOTA V3 Training Function."""
     set_seed(seed)
@@ -303,14 +305,27 @@ def train_sota_v3(
         enable_hyperbolic=True,
     )
 
-    # Pure Scratch Initialization Policy:
-    # Zero warmstart from previous V1/V2 checkpoints.
-    # Foundation ViT trunk loads authentic pretrained weights; all surgical modules are freshly initialized.
-    if accelerator.is_main_process:
-        print("[SOTA-V3] Initialization Mode: PURE SCRATCH TRAINING")
-        print("  - Foundation ViT trunk: Pretrained weights loaded cleanly")
-        print("  - Surgical Modules: ConvPass, DMHA, PCNorm, AGCA, Hyperbolic Head freshly initialized from scratch")
-        print("  - Zero weight transfer or leakage from previous V1/V2 checkpoints")
+    if resume_from and os.path.isfile(resume_from):
+        if accelerator.is_main_process:
+            print(f"[SOTA-V3] RESUMING TRAINING: Loading checkpoint from {resume_from}...")
+        ckpt = torch.load(resume_from, map_location="cpu", weights_only=False)
+        sd = ckpt.get("model_state_dict", ckpt)
+        clean_sd = {}
+        for k, v in sd.items():
+            clean_k = k
+            if clean_k.startswith("module."):
+                clean_k = clean_k[7:]
+            if clean_k.startswith("_orig_mod."):
+                clean_k = clean_k[10:]
+            clean_sd[clean_k] = v
+        missing, unexpected = model.load_state_dict(clean_sd, strict=False)
+        if accelerator.is_main_process:
+            print(f"[SOTA-V3] Checkpoint loaded successfully! Missing keys: {len(missing)}, Unexpected keys: {len(unexpected)}")
+    else:
+        if accelerator.is_main_process:
+            print("[SOTA-V3] Initialization Mode: PURE SCRATCH TRAINING")
+            print("  - Foundation ViT trunk: Pretrained weights loaded cleanly")
+            print("  - Surgical Modules: ConvPass, DMHA, PCNorm, AGCA, Hyperbolic Head freshly initialized from scratch")
 
     # 3. Layer-Wise Optimizer Partitioning (LLRD)
     # Trunk gets trunk_lr; newly inserted surgical components get surgical_lr (10x higher)
@@ -368,7 +383,7 @@ def train_sota_v3(
     # Training Loop
     for epoch in range(start_epoch, epochs + 1):
         model.train()
-        train_dataset.set_curriculum_epoch(epoch, epochs)
+        train_dataset.set_curriculum_epoch(epoch, epochs, offset=initial_curriculum_progress)
         epoch_start_time = time.time()
         running_loss = 0.0
         step_count = 0
@@ -490,6 +505,8 @@ if __name__ == "__main__":
     parser.add_argument("--max_samples", type=int, default=None)
     parser.add_argument("--pretrained", action="store_true", default=True)
     parser.add_argument("--no_pretrained", action="store_false", dest="pretrained")
+    parser.add_argument("--resume_from", type=str, default=None, help="Path to checkpoint (e.g. best_model.pt) to resume training from")
+    parser.add_argument("--initial_curriculum_progress", type=float, default=0.0, help="Initial CBS degradation curriculum progress (0.0 to 1.0)")
     args = parser.parse_args()
 
     train_sota_v3(
@@ -504,4 +521,6 @@ if __name__ == "__main__":
         eval_every=args.eval_every,
         max_samples=args.max_samples,
         pretrained=args.pretrained,
+        resume_from=args.resume_from,
+        initial_curriculum_progress=args.initial_curriculum_progress,
     )

@@ -335,9 +335,10 @@ class SOTAUPARDatasetV3(Dataset):
                 mem_mb = sum(len(b) for b in self.ram_cache) / (1024 * 1024)
                 print(f"[RAM Cache V3] Successfully preloaded {total_count:,} images ({mem_mb:.1f} MB) in host RAM!", flush=True)
 
-    def set_curriculum_epoch(self, epoch: int, total_epochs: int):
-        """Sets CBS curriculum difficulty based on current epoch fraction."""
-        progress = max(0.0, min(1.0, epoch / max(1, total_epochs)))
+    def set_curriculum_epoch(self, epoch: int, total_epochs: int, offset: float = 0.0):
+        """Sets CBS curriculum difficulty based on current epoch fraction with optional minimum offset."""
+        raw_progress = max(0.0, min(1.0, epoch / max(1, total_epochs)))
+        progress = max(offset, raw_progress)
         self.transform.set_curriculum_progress(progress)
 
     def _get_h5(self):

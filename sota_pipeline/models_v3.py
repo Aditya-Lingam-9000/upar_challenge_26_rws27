@@ -232,7 +232,7 @@ class DeformableMultiHeadAttention(nn.Module):
         v_2d = v_2d.reshape(B * self.num_heads, self.head_dim, grid_h, grid_w)
 
         # Reshape sample_grid: [B * num_heads, grid_h, grid_w, 2]
-        sample_grid_flat = sample_grid.reshape(B * self.num_heads, grid_h, grid_w, 2)
+        sample_grid_flat = sample_grid.reshape(B * self.num_heads, grid_h, grid_w, 2).to(dtype=k_2d.dtype)
 
         # Differentiable bilinear sampling
         k_deformed = F.grid_sample(
@@ -329,7 +329,7 @@ class AnatomicalGaussianCrossAttention(nn.Module):
         Returns: [1, 1, K, N]
         """
         # Vertical normalized coordinates y in [0, 1]
-        y_coords = torch.linspace(0.0, 1.0, grid_h, device=device).unsqueeze(1).repeat(1, grid_w).flatten()  # [N]
+        y_coords = torch.linspace(0.0, 1.0, grid_h, device=device, dtype=self.mu_priors.dtype).unsqueeze(1).repeat(1, grid_w).flatten()  # [N]
         # Gaussian prior: exp(- (y - mu_k)^2 / (2 * sigma^2))
         # mu_priors: [K, 1]
         mu = self.mu_priors.unsqueeze(1).to(device)
@@ -371,10 +371,10 @@ class AnatomicalGaussianCrossAttention(nn.Module):
 
         # Add Gaussian spatial prior bias
         if N == grid_h * grid_w:
-            log_prior = self._compute_gaussian_bias(grid_h, grid_w, device)  # [1, 1, K, N]
+            log_prior = self._compute_gaussian_bias(grid_h, grid_w, device).to(dtype=attn_logits.dtype)  # [1, 1, K, N]
             attn_logits = attn_logits + self.lambda_prior * log_prior
 
-        attn_weights = F.softmax(attn_logits, dim=-1)  # [B, num_heads, K, N]
+        attn_weights = F.softmax(attn_logits, dim=-1).to(dtype=v.dtype)  # [B, num_heads, K, N]
 
         # Contextual part outputs: [B, num_heads, K, head_dim]
         part_out = torch.matmul(attn_weights, v)

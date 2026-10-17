@@ -277,5 +277,10 @@ print("SENSITIVITY_SUCCESS")
 
 
 if __name__ == "__main__":
-    zip_target = os.path.join(ROOT_DIR, "submissions", "submission_sota_v2.zip")
+    if len(sys.argv) > 1 and not sys.argv[1].startswith("--"):
+        zip_target = sys.argv[1]
+    elif len(sys.argv) > 1 and sys.argv[1].startswith("--zip_path="):
+        zip_target = sys.argv[1].split("=", 1)[1]
+    else:
+        zip_target = os.path.join(ROOT_DIR, "submissions", "submission_sota_v3.zip")
     run_sandbox_audit(zip_target)
