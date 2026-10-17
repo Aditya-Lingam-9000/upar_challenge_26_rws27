@@ -533,44 +533,34 @@ class ContinuousAttributePrompter(nn.Module):
 # =====================================================================
 class TestTimeComputeEngine:
     """
-    SOTA Championship High-Compute Test-Time Suite:
-    1. Dynamic Gallery Marginal Calibration: Blends empirical test gallery base rates
-       with known priors to eliminate camera sensor color shifts without distorting rare traits.
-    2. Alpha-DBA (Database Feature Augmentation): Smooths gallery representations with top-3
-       mutual neighbors on the gallery manifold (beta=2.0, k=3).
-    3. Two-Stage Multi-Hop Alpha-QE: Iteratively expands continuous query representations
-       against the smoothed gallery manifold (alpha=3.0, k=5).
-    4. Cascaded Metric-First Filtering (Top-1,200): Evaluates the top 1,200 candidates
-       (covering 4.1% of the 29,248 gallery candidates).
-    5. Asymmetric Directional Penalty (Miss: 1.0, Extra: 0.15 with dead-zone margin 0.70).
+    SOTA Championship Test-Time Compute Suite:
+    1. Prior-Matching Attribute Calibration: Newton-Raphson calibrates gallery
+       attribute logits so that predicted sigmoid probabilities match true dataset priors.
+    2. Alpha-Query Expansion (Alpha-QE): Cubic power-sharpened query expansion against
+       the gallery manifold (alpha=3.0, k=5).
+    3. Cascaded Metric-First Filtering + Asymmetric Directional Distance:
+       Isolates the top-300 candidates by continuous metric distance, then applies
+       asymmetric directional penalty (missing traits penalized 1.0, extra traits 0.15 with
+       dead-zone margin 0.70) with surprisal dynamic weighting strictly within the candidate pool.
+       Preserves global retrieval geometry while eliminating attribute noise.
     """
 
     def __init__(self, device: torch.device):
         self.device = device
-        self.alpha_dba = 2.0
-        self.topk_dba = 3
         self.alpha_qe = 3.0
         self.topk_qe = 5
-        self.cascade_k = 1500
+        self.cascade_k = 300
         self.attr_priors = UPAR_ATTR_PRIORS.copy()
 
-    def dynamic_marginal_calibration(
+    def prior_matching_calibration(
         self,
         gal_logits_np: np.ndarray,
         target_priors: np.ndarray,
         max_iters: int = 5,
     ) -> np.ndarray:
-        # 1. Compute empirical marginal base rate of test gallery
-        gal_probs_raw = 1.0 / (1.0 + np.exp(-np.clip(gal_logits_np, -50.0, 50.0)))
-        gal_marginals = gal_probs_raw.mean(axis=0)
-
-        # 2. Blended target priors (50% dataset prior + 50% test gallery marginals)
-        blended_priors = 0.50 * target_priors + 0.50 * gal_marginals
-
-        # 3. Newton-Raphson logit calibration to match blended distribution
         calib_logits = gal_logits_np.copy()
         for a in range(gal_logits_np.shape[1]):
-            pi_a = blended_priors[a]
+            pi_a = target_priors[a]
             delta = 0.0
             for _ in range(max_iters):
                 z = np.clip(calib_logits[:, a] + delta, -50.0, 50.0)
@@ -584,36 +574,14 @@ class TestTimeComputeEngine:
             calib_logits[:, a] += delta
         return 1.0 / (1.0 + np.exp(-np.clip(calib_logits, -50.0, 50.0)))
 
-    def apply_alpha_dba(self, gal_embeds: torch.Tensor) -> torch.Tensor:
-        """Alpha-DBA: Smooths gallery representations with top-3 mutual neighbors."""
-        G, D = gal_embeds.shape
-        dba_gal = torch.zeros_like(gal_embeds)
-        batch_size = 4096
-        for s in range(0, G, batch_size):
-            e = min(s + batch_size, G)
-            sims = torch.matmul(gal_embeds[s:e], gal_embeds.T)
-            top_vals, top_inds = torch.topk(sims, k=min(self.topk_dba + 1, G), dim=-1, largest=True)
-            weights = top_vals[:, 1:].clamp(min=0.0).pow(self.alpha_dba).unsqueeze(-1)
-            neighbors = gal_embeds[top_inds[:, 1:]]
-            smoothed = gal_embeds[s:e] + (weights * neighbors).sum(dim=1)
-            dba_gal[s:e] = F.normalize(smoothed, p=2, dim=-1)
-        return dba_gal
-
-    def apply_iterative_alpha_qe(self, query_embeds: torch.Tensor, gal_embeds: torch.Tensor) -> torch.Tensor:
-        """Two-Stage Multi-Hop Alpha-QE with cubic sharpening."""
-        # Hop 1
-        sims1 = torch.matmul(query_embeds, gal_embeds.T)
+    def apply_alpha_qe(self, query_embeds: torch.Tensor, gal_embeds: torch.Tensor) -> torch.Tensor:
+        sims = torch.matmul(query_embeds, gal_embeds.T)
         k_val = min(self.topk_qe, gal_embeds.shape[0])
-        top_vals1, top_inds1 = torch.topk(sims1, k=k_val, dim=-1, largest=True)
-        w1 = top_vals1.clamp(min=0.0).pow(self.alpha_qe).unsqueeze(-1)
-        q_hop1 = F.normalize(query_embeds + (w1 * gal_embeds[top_inds1]).sum(dim=1), p=2, dim=-1)
-
-        # Hop 2 (refined multi-hop expansion)
-        sims2 = torch.matmul(q_hop1, gal_embeds.T)
-        top_vals2, top_inds2 = torch.topk(sims2, k=k_val, dim=-1, largest=True)
-        w2 = top_vals2.clamp(min=0.0).pow(self.alpha_qe).unsqueeze(-1)
-        q_hop2 = F.normalize(q_hop1 + 0.50 * (w2 * gal_embeds[top_inds2]).sum(dim=1), p=2, dim=-1)
-        return q_hop2
+        top_vals, top_inds = torch.topk(sims, k=k_val, dim=-1, largest=True)
+        weights = top_vals.clamp(min=0.0).pow(self.alpha_qe).unsqueeze(-1)
+        retrieved_feats = gal_embeds[top_inds]
+        expanded = query_embeds + (weights * retrieved_feats).sum(dim=1)
+        return F.normalize(expanded, p=2, dim=-1)
 
     def cascaded_asymmetric_reranking(
         self,
@@ -675,39 +643,34 @@ class TestTimeComputeEngine:
         Q, D = query_embeds_np.shape
         G, _ = gal_embeds_np.shape
 
-        print(f"[TTCE] Running SOTA Championship High-Compute Suite on {_DEVICE} ({Q:,} queries, {G:,} gallery)...", flush=True)
+        print(f"[TTCE] Running SOTA Championship Inference Suite on {_DEVICE} ({Q:,} queries, {G:,} gallery)...", flush=True)
 
-        # 1. Dynamic Gallery Marginal Calibration
+        # 1. Prior-Matching Attribute Calibration
         t1 = time.time()
-        gal_probs_calib = self.dynamic_marginal_calibration(gal_logits_np, self.attr_priors)
-        print(f"[TTCE] Dynamic gallery marginal calibration completed in {time.time() - t1:.3f}s", flush=True)
+        gal_probs_calib = self.prior_matching_calibration(gal_logits_np, self.attr_priors)
+        print(f"[TTCE] Prior-matching attribute calibration completed in {time.time() - t1:.3f}s", flush=True)
 
+        # 2. Alpha-Query Expansion (Alpha-QE on GPU)
+        t2 = time.time()
         with torch.no_grad():
             query_t = torch.from_numpy(query_embeds_np).float().to(self.device)
             gal_t = torch.from_numpy(gal_embeds_np).float().to(self.device)
-
-            # 2. Alpha-DBA Gallery Smoothing
-            t2 = time.time()
-            gal_dba_t = self.apply_alpha_dba(gal_t)
-            print(f"[TTCE] Alpha-DBA gallery smoothing completed in {time.time() - t2:.3f}s", flush=True)
-
-            # 3. Two-Stage Multi-Hop Alpha-QE
-            t3 = time.time()
-            query_qe_t = self.apply_iterative_alpha_qe(query_t, gal_dba_t)
-            cos_sim = torch.matmul(query_qe_t, gal_dba_t.T)
+            query_qe_t = self.apply_alpha_qe(query_t, gal_t)
+            # Continuous metric distance: d_metric = 1.0 - (Q_qe @ G_tta.T)
+            cos_sim = torch.matmul(query_qe_t, gal_t.T)
             dist_metric_t = 1.0 - cos_sim
             dist_metric_np = dist_metric_t.cpu().numpy()
-            print(f"[TTCE] Two-Stage Multi-Hop Alpha-QE completed in {time.time() - t3:.3f}s", flush=True)
+        print(f"[TTCE] Alpha-QE (alpha={self.alpha_qe}, k={self.topk_qe}) completed in {time.time() - t2:.3f}s", flush=True)
 
-        # 4. Cascaded Asymmetric Reranking with Expanded Pool (Top-1,200)
-        t4 = time.time()
+        # 3. Cascaded Metric-First Filtering (Top-300) + Asymmetric Directional Penalty
+        t3 = time.time()
         final_distances = self.cascaded_asymmetric_reranking(
             dist_metric_np=dist_metric_np,
             queries_raw_np=queries_raw_np,
             gal_probs_calib_np=gal_probs_calib,
             attr_priors_np=self.attr_priors,
         )
-        print(f"[TTCE] Cascaded Asymmetric Reranking (Top-{min(self.cascade_k, G):,}) completed in {time.time() - t4:.3f}s", flush=True)
+        print(f"[TTCE] Cascaded Asymmetric Reranking (Top-{min(self.cascade_k, G)}) completed in {time.time() - t3:.3f}s", flush=True)
         print(f"[TTCE] Total Test-Time Compute Suite finished in {time.time() - t0:.2f}s!", flush=True)
         return final_distances
 
@@ -888,29 +851,13 @@ def rank_gallery(
         # Pass 1: Original orientation
         metric_emb_orig, attr_logits_orig = _VISUAL_MODEL(batch_x)
 
-        # Pass 2: Horizontal Flip TTA (viewpoint symmetry invariance)
+        # Pass 2: Horizontal Flip TTA
         batch_x_flip = torch.flip(batch_x, dims=[-1])
         metric_emb_flip, attr_logits_flip = _VISUAL_MODEL(batch_x_flip)
 
-        # Pass 3: 90% Center Zoom Crop TTA (suppresses border background clutter & scale variation)
-        H, W = batch_x.shape[-2:]
-        hc, wc = int(0.90 * H), int(0.90 * W)
-        y1, x1 = (H - hc) // 2, (W - wc) // 2
-        batch_x_zoom = F.interpolate(
-            batch_x[:, :, y1 : y1 + hc, x1 : x1 + wc],
-            size=(H, W),
-            mode="bilinear",
-            align_corners=False,
-        )
-        metric_emb_zoom, attr_logits_zoom = _VISUAL_MODEL(batch_x_zoom)
-
-        # 3-Pass High-Compute TTA Fusion (40% orig + 40% flip + 20% zoom)
-        metric_emb = F.normalize(
-            0.40 * metric_emb_orig + 0.40 * metric_emb_flip + 0.20 * metric_emb_zoom,
-            p=2,
-            dim=-1,
-        )
-        attr_logits = 0.40 * attr_logits_orig + 0.40 * attr_logits_flip + 0.20 * attr_logits_zoom
+        # TTA Fusion: normalized sum for embeddings, mean for logits
+        metric_emb = F.normalize(metric_emb_orig + metric_emb_flip, p=2, dim=-1)
+        attr_logits = 0.5 * (attr_logits_orig + attr_logits_flip)
 
         gal_embeds_list.append(metric_emb.cpu().float())
         gal_logits_list.append(attr_logits.cpu().float())
