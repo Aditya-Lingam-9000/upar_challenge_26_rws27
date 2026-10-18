@@ -447,6 +447,9 @@ class UPARDataset(Dataset):
         split: str = "train",
         transform: Optional[Callable] = None,
         surveillance_aug: bool = True,
+        target_size: Tuple[int, int] = (224, 224),
+        preload_to_ram: bool = False,
+        **kwargs: Any,
     ) -> None:
         """Initialize UPARDataset.
 
@@ -456,6 +459,9 @@ class UPARDataset(Dataset):
             transform: Custom torchvision transform. If None, default transform for
                 the chosen split is automatically constructed.
             surveillance_aug: If True and split == 'train', applies SurveillanceDegradation.
+            target_size: Tuple of (height, width) for image crop/resize (default: 224x224).
+            preload_to_ram: If True, pre-caches raw encoded bytes in RAM for high IOPS.
+            **kwargs: Extra compatibility arguments.
         """
         super().__init__()
         self.h5_path = resolve_h5_path(h5_path)
@@ -464,39 +470,49 @@ class UPARDataset(Dataset):
 
         self.split = str(split).strip()
         self.surveillance_aug = bool(surveillance_aug)
+        self.target_size = tuple(target_size)
+        self.preload_to_ram = bool(preload_to_ram)
 
-        # Initialize internal HDF5 handle and transparent proxy
-        self._raw_h5: Optional[h5py.File] = h5py.File(self.h5_path, "r")
-        self._proxy: Optional[_H5FileProxy] = _H5FileProxy(self._raw_h5)
+        # Open briefly to read labels and shape metadata, then close immediately
+        # This prevents inheriting an open file descriptor in DataLoader worker forks
+        with h5py.File(self.h5_path, "r") as init_h5:
+            if self.split not in init_h5:
+                raise KeyError(
+                    f"Split '{self.split}' not found in HDF5 container at {self.h5_path}. "
+                    f"Available groups: {list(init_h5.keys())}"
+                )
 
-        if self.split not in self._raw_h5:
-            raise KeyError(
-                f"Split '{self.split}' not found in HDF5 container at {self.h5_path}. "
-                f"Available groups: {list(self._raw_h5.keys())}"
-            )
+            split_grp = init_h5[self.split]
 
-        split_grp = self._raw_h5[self.split]
+            # Resolve labels key ('labels' or 'attributes')
+            label_key = "labels" if "labels" in split_grp else "attributes"
+            if label_key not in split_grp:
+                raise KeyError(f"Neither 'labels' nor 'attributes' found in group '{self.split}'")
 
-        # Resolve labels key ('labels' or 'attributes')
-        label_key = "labels" if "labels" in split_grp else "attributes"
-        if label_key not in split_grp:
-            raise KeyError(f"Neither 'labels' nor 'attributes' found in group '{self.split}'")
+            # Load labels into memory as float32 numpy array
+            self.labels: np.ndarray = np.asarray(split_grp[label_key][:], dtype=np.float32)
+            self.length: int = len(self.labels)
 
-        # Load labels into memory as float32 numpy array
-        self.labels: np.ndarray = np.asarray(split_grp[label_key][:], dtype=np.float32)
-        self.length: int = len(self.labels)
+            # Resolve image storage key ('images' or 'image_bytes')
+            self.img_key: str = "images" if "images" in split_grp else "image_bytes"
 
-        # Resolve image storage key ('images' or 'image_bytes')
-        self.img_key: str = "images" if "images" in split_grp else "image_bytes"
+            self.ram_cache: Optional[List[bytes]] = None
+            if self.preload_to_ram:
+                img_ds = split_grp[self.img_key]
+                self.ram_cache = [_extract_image_bytes(img_ds[i]) for i in range(self.length)]
+
+        self._raw_h5: Optional[h5py.File] = None
+        self._proxy: Optional[_H5FileProxy] = None
+        self._owner_pid: Optional[int] = None
 
         # Configure transforms
         if transform is not None:
             self.transform: Optional[Callable] = transform
         else:
             if self.split == "train":
-                self.transform = get_train_transform()
+                self.transform = get_train_transform(target_size=self.target_size)
             else:
-                self.transform = get_val_transform()
+                self.transform = get_val_transform(target_size=self.target_size)
 
         # Configure surveillance degradation (train split only)
         if self.split == "train" and self.surveillance_aug:
@@ -507,9 +523,21 @@ class UPARDataset(Dataset):
     @property
     def h5(self) -> _H5FileProxy:
         """Return multi-worker safe HDF5 file proxy in read-only mode."""
-        if self._raw_h5 is None or not getattr(self._raw_h5, "id", None) or not self._raw_h5.id.valid:
-            self._raw_h5 = h5py.File(self.h5_path, "r")
+        curr_pid = os.getpid()
+        if (
+            self._raw_h5 is None
+            or self._owner_pid != curr_pid
+            or not getattr(self._raw_h5, "id", None)
+            or not self._raw_h5.id.valid
+        ):
+            if self._raw_h5 is not None and self._owner_pid == curr_pid:
+                try:
+                    self._raw_h5.close()
+                except Exception:
+                    pass
+            self._raw_h5 = h5py.File(self.h5_path, "r", swmr=True)
             self._proxy = _H5FileProxy(self._raw_h5)
+            self._owner_pid = curr_pid
         return self._proxy  # type: ignore
 
     def __len__(self) -> int:
@@ -522,6 +550,7 @@ class UPARDataset(Dataset):
         # Drop open file handles prior to serialization
         state["_raw_h5"] = None
         state["_proxy"] = None
+        state["_owner_pid"] = None
         return state
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
@@ -529,6 +558,7 @@ class UPARDataset(Dataset):
         self.__dict__.update(state)
         self._raw_h5 = None
         self._proxy = None
+        self._owner_pid = None
 
     def _load_single_item(self, idx: int) -> Dict[str, Any]:
         """Load and transform a single sample from HDF5.
@@ -537,11 +567,14 @@ class UPARDataset(Dataset):
             idx: Sample index in [0, length - 1].
 
         Returns:
-            Dictionary containing 'image', 'labels', 'text', and 'index'.
+            Dictionary containing 'image', 'labels', 'attributes', 'text', and 'index'.
         """
-        # Retrieve encoded image bytes via H5 proxy
-        raw_entry = self.h5[f"{self.split}/{self.img_key}"][idx]
-        raw_bytes = _extract_image_bytes(raw_entry)
+        if self.ram_cache is not None:
+            raw_bytes = self.ram_cache[idx]
+        else:
+            # Retrieve encoded image bytes via H5 proxy
+            raw_entry = self.h5[f"{self.split}/{self.img_key}"][idx]
+            raw_bytes = _extract_image_bytes(raw_entry)
 
         # Decode JPEG / PNG into PIL RGB Image
         img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
@@ -564,6 +597,7 @@ class UPARDataset(Dataset):
         return {
             "image": img_tensor,
             "labels": label_tensor,
+            "attributes": label_tensor,
             "text": text_desc,
             "index": int(idx),
         }
@@ -613,11 +647,11 @@ class UPARDataset(Dataset):
 # ==============================================================================
 # Standard Transforms (CLIP ViT-L/14 Resolution 224x224)
 # ==============================================================================
-def get_train_transform() -> T.Compose:
+def get_train_transform(target_size: Tuple[int, int] = (224, 224)) -> T.Compose:
     """Build standard training data augmentation pipeline for CLIP ViT-L/14.
 
     Pipeline:
-    1. Resize to (224, 224) with BICUBIC interpolation
+    1. Resize to target_size (default: 224x224) with BICUBIC interpolation
     2. RandomHorizontalFlip(p=0.5)
     3. ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.1)
     4. RandomGrayscale(p=0.1)
@@ -629,7 +663,7 @@ def get_train_transform() -> T.Compose:
         torchvision.transforms.Compose pipeline.
     """
     return T.Compose([
-        T.Resize((224, 224), interpolation=T.InterpolationMode.BICUBIC),
+        T.Resize(tuple(target_size), interpolation=T.InterpolationMode.BICUBIC),
         T.RandomHorizontalFlip(p=0.5),
         T.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.1),
         T.RandomGrayscale(p=0.1),
@@ -639,11 +673,11 @@ def get_train_transform() -> T.Compose:
     ])
 
 
-def get_val_transform() -> T.Compose:
+def get_val_transform(target_size: Tuple[int, int] = (224, 224)) -> T.Compose:
     """Build deterministic validation transform pipeline for CLIP ViT-L/14.
 
     Pipeline:
-    1. Resize to (224, 224) with BICUBIC interpolation
+    1. Resize to target_size (default: 224x224) with BICUBIC interpolation
     2. ToTensor()
     3. Normalize with standard CLIP mean and std
 
@@ -651,7 +685,7 @@ def get_val_transform() -> T.Compose:
         torchvision.transforms.Compose pipeline.
     """
     return T.Compose([
-        T.Resize((224, 224), interpolation=T.InterpolationMode.BICUBIC),
+        T.Resize(tuple(target_size), interpolation=T.InterpolationMode.BICUBIC),
         T.ToTensor(),
         T.Normalize(mean=list(CLIP_MEAN), std=list(CLIP_STD)),
     ])
@@ -672,18 +706,20 @@ def upar_collate_fn(batch: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         Collated dictionary containing:
         - 'image': FloatTensor of shape [B, 3, 224, 224]
         - 'labels': FloatTensor of shape [B, 40]
+        - 'attributes': FloatTensor of shape [B, 40]
         - 'text': List[str] of length B
         - 'index': LongTensor of shape [B]
         - Convenience aliases: 'images', 'texts', 'indices'
     """
     images = torch.stack([item["image"] for item in batch], dim=0)
-    labels = torch.stack([item["labels"] for item in batch], dim=0)
-    texts = [str(item["text"]) for item in batch]
-    indices = torch.tensor([int(item["index"]) for item in batch], dtype=torch.long)
+    labels = torch.stack([item.get("labels", item.get("attributes")) for item in batch], dim=0)
+    texts = [str(item.get("text", item.get("texts", ""))) for item in batch]
+    indices = torch.tensor([int(item.get("index", item.get("indices", 0))) for item in batch], dtype=torch.long)
 
     return {
         "image": images,
         "labels": labels,
+        "attributes": labels,
         "text": texts,
         "index": indices,
         # Convenience aliases
@@ -757,3 +793,10 @@ def build_dataloaders(
     )
 
     return train_loader, val_loader
+
+
+# ==============================================================================
+# Aliases for Championship Pipeline Compatibility
+# ==============================================================================
+UPARDatasetV4 = UPARDataset
+

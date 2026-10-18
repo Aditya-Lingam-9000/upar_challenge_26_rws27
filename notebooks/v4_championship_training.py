@@ -90,8 +90,9 @@ REPO_URL = f"https://{GITHUB_TOKEN}@github.com/Aditya-Lingam-9000/upar_challenge
 WORK_DIR = "/kaggle/working/upar_challenge_26_rws27"
 
 if os.path.isdir(WORK_DIR):
-    print(f"[GIT] Repository already exists at {WORK_DIR}, pulling latest...")
-    subprocess.check_call(["git", "-C", WORK_DIR, "pull", "--ff-only"])
+    print(f"[GIT] Repository already exists at {WORK_DIR}, syncing latest main...")
+    subprocess.check_call(["git", "-C", WORK_DIR, "fetch", "origin", "main"])
+    subprocess.check_call(["git", "-C", WORK_DIR, "reset", "--hard", "origin/main"])
 else:
     print(f"[GIT] Cloning repository into {WORK_DIR}...")
     subprocess.check_call(["git", "clone", "--depth", "1", REPO_URL, WORK_DIR])

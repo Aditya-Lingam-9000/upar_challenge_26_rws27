@@ -185,18 +185,42 @@ except ImportError:
         V4ChampionshipLoss = None
 
 try:
-    from sota_pipeline.dataset_v4 import UPARDatasetV4
+    from sota_pipeline.dataset_v4 import (
+        UPARDataset,
+        UPARDatasetV4,
+        upar_collate_fn,
+        build_dataloaders,
+    )
 except ImportError:
     try:
-        from sota_pipeline.dataset_v4 import UPARDataset as UPARDatasetV4
+        from dataset_v4 import (
+            UPARDataset,
+            UPARDatasetV4,
+            upar_collate_fn,
+            build_dataloaders,
+        )
     except ImportError:
-        try:
-            from dataset_v4 import UPARDatasetV4
-        except ImportError:
-            try:
-                from dataset_v4 import UPARDataset as UPARDatasetV4
-            except ImportError:
-                UPARDatasetV4 = None
+        UPARDatasetV4 = None
+        upar_collate_fn = None
+        build_dataloaders = None
+
+if upar_collate_fn is None:
+    def upar_collate_fn(batch: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+        images = torch.stack([item["image"] for item in batch], dim=0)
+        labels = torch.stack([item.get("labels", item.get("attributes")) for item in batch], dim=0)
+        texts = [str(item.get("text", item.get("texts", ""))) for item in batch]
+        indices = torch.tensor([int(item.get("index", item.get("indices", 0))) for item in batch], dtype=torch.long)
+        return {
+            "image": images,
+            "images": images,
+            "labels": labels,
+            "attributes": labels,
+            "text": texts,
+            "texts": texts,
+            "index": indices,
+            "indices": indices,
+        }
+
 
 
 # Fallback class definitions if modules are not yet standalone files
@@ -211,7 +235,7 @@ if CLIPAttributeRetrievalModel is None:
             pretrained: bool = True,
             embed_dim: int = 768,
             num_attrs: int = 40,
-            backbone_name: str = "vit_large_patch14_clip_224",
+            backbone_name: str = "vit_large_patch14_clip_224.openai",
         ) -> None:
             super().__init__()
             self.backbone = timm.create_model(backbone_name, pretrained=pretrained, num_classes=0)
@@ -890,6 +914,7 @@ def train(args: Optional[argparse.Namespace] = None, **kwargs) -> None:
         num_workers=args.num_workers,
         pin_memory=torch.cuda.is_available(),
         drop_last=True,
+        collate_fn=upar_collate_fn,
     )
     val_loader = DataLoader(
         val_dataset,
@@ -897,6 +922,7 @@ def train(args: Optional[argparse.Namespace] = None, **kwargs) -> None:
         shuffle=False,
         num_workers=args.num_workers,
         pin_memory=torch.cuda.is_available(),
+        collate_fn=upar_collate_fn,
     )
 
     # 5. Initialize Models
@@ -1154,6 +1180,9 @@ def train(args: Optional[argparse.Namespace] = None, **kwargs) -> None:
                     global_step=global_step,
                     is_best=is_best,
                 )
+
+            # Synchronize distributed ranks at epoch boundary
+            accelerator.wait_for_everyone()
 
         # 14. Save Final Best Submission Model
         if accelerator.is_main_process:
