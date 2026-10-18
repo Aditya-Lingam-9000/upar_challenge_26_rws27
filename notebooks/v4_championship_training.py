@@ -194,13 +194,13 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 RESUME_FROM = None  # Set to checkpoint path for sessions 2+
 # Example: RESUME_FROM = "/kaggle/working/v4_outputs/checkpoint_epoch_50.pt"
 
-EPOCHS = 120        # Total epochs (across all sessions)
-BATCH_SIZE = 32     # Per-GPU batch size
-GRAD_ACCUM = 2      # Gradient accumulation steps
+EPOCHS = 40        # Total epochs (Session 1: epochs 1-20, Session 2: epochs 21-40)
+BATCH_SIZE = 24    # Per-GPU batch size (tuned for 14.0 GB / 14.5 GB VRAM)
+GRAD_ACCUM = 3     # Gradient accumulation steps (effective batch size: 24 × 3 × 2 = 144)
 BACKBONE_LR = 5e-6  # Backbone learning rate
 HEAD_LR = 5e-4      # Head learning rate
-SAVE_EVERY = 5      # Save checkpoint every N epochs
-EVAL_EVERY = 5      # Evaluate every N epochs
+SAVE_EVERY = 1      # Rewrite latest/best checkpoint every epoch
+EVAL_EVERY = 1      # Evaluate every epoch
 # -------------------------------------------
 
 cmd = [

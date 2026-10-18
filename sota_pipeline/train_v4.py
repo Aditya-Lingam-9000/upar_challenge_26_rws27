@@ -795,15 +795,12 @@ def save_checkpoint(
         accelerator.print(f"[EMERGENCY] Saved emergency checkpoint to: {path}")
         return
 
-    # 1. Periodic checkpoint
-    path_epoch = os.path.join(output_dir, f"checkpoint_epoch_{epoch}.pt")
-    torch.save(checkpoint, path_epoch)
-
-    # 2. Latest checkpoint (for seamless multi-session resume)
+    # 1. Latest checkpoint (overwritten every epoch for seamless multi-session resume)
     path_latest = os.path.join(output_dir, "checkpoint_latest.pt")
     torch.save(checkpoint, path_latest)
+    accelerator.print(f"[CHECKPOINT] Updated latest checkpoint: {path_latest} (Epoch {epoch})")
 
-    # 3. Best checkpoint
+    # 2. Best checkpoint (overwritten only when validation mADM reaches a new high)
     if is_best:
         path_best = os.path.join(output_dir, "checkpoint_best.pt")
         torch.save(checkpoint, path_best)
@@ -1165,21 +1162,20 @@ def train(args: Optional[argparse.Namespace] = None, **kwargs) -> None:
                         best_madm = madm
                         is_best = True
 
-            # 13. Periodic Checkpoint Saving
-            if epoch % args.save_every == 0 or epoch == args.epochs or is_best:
-                save_checkpoint(
-                    output_dir=args.output_dir,
-                    epoch=epoch,
-                    visual_model=visual_model,
-                    prompter=prompter,
-                    text_projection=text_projection,
-                    optimizer=optimizer,
-                    scheduler=scheduler,
-                    accelerator=accelerator,
-                    best_madm=best_madm,
-                    global_step=global_step,
-                    is_best=is_best,
-                )
+            # 13. Epoch Checkpoint Saving (rewrites checkpoint_latest.pt every epoch, checkpoint_best.pt if improved)
+            save_checkpoint(
+                output_dir=args.output_dir,
+                epoch=epoch,
+                visual_model=visual_model,
+                prompter=prompter,
+                text_projection=text_projection,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                accelerator=accelerator,
+                best_madm=best_madm,
+                global_step=global_step,
+                is_best=is_best,
+            )
 
             # Synchronize distributed ranks at epoch boundary
             accelerator.wait_for_everyone()
@@ -1261,20 +1257,20 @@ def parse_args(args_list: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--epochs",
         type=int,
-        default=120,
-        help="Total number of epochs to train",
+        default=40,
+        help="Total number of epochs to train (optimal for ViT-L/14 fine-tuning)",
     )
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=32,
-        help="Per-GPU batch size",
+        default=24,
+        help="Per-GPU batch size (tuned for 14.0 GB / 14.5 GB VRAM saturation)",
     )
     parser.add_argument(
         "--grad_accum",
         type=int,
-        default=2,
-        help="Gradient accumulation steps",
+        default=3,
+        help="Gradient accumulation steps (effective batch size: 24 × 3 × 2 = 144)",
     )
     parser.add_argument(
         "--backbone_lr",
@@ -1311,13 +1307,13 @@ def parse_args(args_list: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--save_every",
         type=int,
-        default=5,
-        help="Save checkpoint every N epochs",
+        default=1,
+        help="Save latest/best checkpoint cadence in epochs",
     )
     parser.add_argument(
         "--eval_every",
         type=int,
-        default=5,
+        default=1,
         help="Evaluate on validation set every N epochs",
     )
     parser.add_argument(
