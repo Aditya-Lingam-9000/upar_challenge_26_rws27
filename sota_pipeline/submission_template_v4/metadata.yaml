@@ -1,0 +1,2 @@
+command: python3 run.py
+description: SOTA Championship V4 CLIP ViT-L/14 Cross-Modal Attribute Retrieval
