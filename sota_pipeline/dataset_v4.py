@@ -449,6 +449,7 @@ class UPARDataset(Dataset):
         surveillance_aug: bool = True,
         target_size: Tuple[int, int] = (224, 224),
         preload_to_ram: bool = False,
+        strong_aug: bool = True,
         **kwargs: Any,
     ) -> None:
         """Initialize UPARDataset.
@@ -461,6 +462,7 @@ class UPARDataset(Dataset):
             surveillance_aug: If True and split == 'train', applies SurveillanceDegradation.
             target_size: Tuple of (height, width) for image crop/resize (default: 224x224).
             preload_to_ram: If True, pre-caches raw encoded bytes in RAM for high IOPS.
+            strong_aug: If True and split == 'train', applies domain-robust surveillance augmentation.
             **kwargs: Extra compatibility arguments.
         """
         super().__init__()
@@ -472,6 +474,7 @@ class UPARDataset(Dataset):
         self.surveillance_aug = bool(surveillance_aug)
         self.target_size = tuple(target_size)
         self.preload_to_ram = bool(preload_to_ram)
+        self.strong_aug = bool(strong_aug)
 
         # Open briefly to read labels and shape metadata, then close immediately
         # This prevents inheriting an open file descriptor in DataLoader worker forks
@@ -510,7 +513,7 @@ class UPARDataset(Dataset):
             self.transform: Optional[Callable] = transform
         else:
             if self.split == "train":
-                self.transform = get_train_transform(target_size=self.target_size)
+                self.transform = get_train_transform(target_size=self.target_size, strong_aug=self.strong_aug)
             else:
                 self.transform = get_val_transform(target_size=self.target_size)
 
@@ -647,30 +650,53 @@ class UPARDataset(Dataset):
 # ==============================================================================
 # Standard Transforms (CLIP ViT-L/14 Resolution 224x224)
 # ==============================================================================
-def get_train_transform(target_size: Tuple[int, int] = (224, 224)) -> T.Compose:
-    """Build standard training data augmentation pipeline for CLIP ViT-L/14.
+def get_train_transform(
+    target_size: Tuple[int, int] = (224, 224),
+    strong_aug: bool = True,
+) -> T.Compose:
+    """Build training data augmentation pipeline for CLIP ViT-L/14.
 
-    Pipeline:
-    1. Resize to target_size (default: 224x224) with BICUBIC interpolation
+    If strong_aug is True, applies domain-robust surveillance augmentation:
+    1. RandomResizedCrop(scale 0.82-1.0, ratio 0.85-1.15) with BICUBIC interpolation
     2. RandomHorizontalFlip(p=0.5)
-    3. ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.1)
-    4. RandomGrayscale(p=0.1)
-    5. ToTensor()
-    6. Normalize with standard CLIP mean and std
-    7. RandomErasing(p=0.5, scale=(0.02, 0.4))
+    3. ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1)
+    4. RandomGrayscale(p=0.10)
+    5. GaussianBlur(kernel=5, sigma=0.1-2.0, p=0.25)
+    6. RandAugment(num_ops=2, magnitude=9)
+    7. ToTensor()
+    8. Normalize with standard CLIP mean and std
+    9. RandomErasing(p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3), value="random")
 
     Returns:
         torchvision.transforms.Compose pipeline.
     """
-    return T.Compose([
-        T.Resize(tuple(target_size), interpolation=T.InterpolationMode.BICUBIC),
-        T.RandomHorizontalFlip(p=0.5),
-        T.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.1),
-        T.RandomGrayscale(p=0.1),
-        T.ToTensor(),
-        T.Normalize(mean=list(CLIP_MEAN), std=list(CLIP_STD)),
-        T.RandomErasing(p=0.5, scale=(0.02, 0.4), value="random"),
-    ])
+    if strong_aug:
+        return T.Compose([
+            T.RandomResizedCrop(
+                tuple(target_size),
+                scale=(0.82, 1.0),
+                ratio=(0.85, 1.15),
+                interpolation=T.InterpolationMode.BICUBIC,
+            ),
+            T.RandomHorizontalFlip(p=0.5),
+            T.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
+            T.RandomGrayscale(p=0.10),
+            T.RandomApply([T.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0))], p=0.25),
+            T.RandAugment(num_ops=2, magnitude=9),
+            T.ToTensor(),
+            T.Normalize(mean=list(CLIP_MEAN), std=list(CLIP_STD)),
+            T.RandomErasing(p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3), value="random"),
+        ])
+    else:
+        return T.Compose([
+            T.Resize(tuple(target_size), interpolation=T.InterpolationMode.BICUBIC),
+            T.RandomHorizontalFlip(p=0.5),
+            T.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.1),
+            T.RandomGrayscale(p=0.1),
+            T.ToTensor(),
+            T.Normalize(mean=list(CLIP_MEAN), std=list(CLIP_STD)),
+            T.RandomErasing(p=0.5, scale=(0.02, 0.4), value="random"),
+        ])
 
 
 def get_val_transform(target_size: Tuple[int, int] = (224, 224)) -> T.Compose:
@@ -737,6 +763,7 @@ def build_dataloaders(
     val_batch_size: Optional[int] = None,
     pin_memory: bool = True,
     persistent_workers: bool = False,
+    strong_aug: bool = True,
 ) -> Tuple[DataLoader, DataLoader]:
     """Build PyTorch training and validation DataLoaders for UPAR Challenge.
 
@@ -748,6 +775,7 @@ def build_dataloaders(
         val_batch_size: Mini-batch size for validation (defaults to batch_size if None).
         pin_memory: Whether to pin host memory for accelerated CUDA transfers.
         persistent_workers: Whether to keep DataLoader worker processes alive across epochs.
+        strong_aug: Whether to apply domain-robust surveillance augmentation.
 
     Returns:
         Tuple of (train_loader, val_loader).
@@ -759,6 +787,7 @@ def build_dataloaders(
         h5_path=resolved_path,
         split="train",
         surveillance_aug=surveillance_aug,
+        strong_aug=strong_aug,
     )
     val_dataset = UPARDataset(
         h5_path=resolved_path,

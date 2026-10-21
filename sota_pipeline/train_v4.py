@@ -856,6 +856,46 @@ def load_resumable_checkpoint(
     return start_epoch, best_madm, global_step
 
 
+def load_finetune_weights(
+    checkpoint_path: str,
+    visual_model: nn.Module,
+    prompter: nn.Module,
+    text_projection: nn.Module,
+    accelerator: Accelerator,
+) -> Tuple[int, float, int]:
+    """Loads weights ONLY for fine-tuning, starting fresh with a clean AdamW optimizer and scheduler."""
+    accelerator.print(f"[FINETUNE] Loading pretrained weights from: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+
+    unwrapped_visual = accelerator.unwrap_model(visual_model)
+    v_missing, v_unexp = unwrapped_visual.load_state_dict(clean_state_dict(checkpoint["visual_model"]), strict=False)
+    accelerator.print(f"[FINETUNE] Visual Model loaded (Missing: {len(v_missing)}, Unexpected: {len(v_unexp)})")
+
+    unwrapped_prompter = accelerator.unwrap_model(prompter)
+    p_missing, p_unexp = unwrapped_prompter.load_state_dict(clean_state_dict(checkpoint["prompter"]), strict=False)
+    accelerator.print(f"[FINETUNE] Prompter loaded (Missing: {len(p_missing)}, Unexpected: {len(p_unexp)})")
+
+    if "text_projection" in checkpoint:
+        unwrapped_tp = accelerator.unwrap_model(text_projection)
+        t_missing, t_unexp = unwrapped_tp.load_state_dict(clean_state_dict(checkpoint["text_projection"]), strict=False)
+        accelerator.print(f"[FINETUNE] Text Projection loaded (Missing: {len(t_missing)}, Unexpected: {len(t_unexp)})")
+
+    source_epoch = checkpoint.get("epoch", "unknown")
+    source_madm = float(checkpoint.get("best_madm", 0.0))
+    del checkpoint
+    gc.collect()
+
+    start_epoch = 1
+    best_madm = 0.0
+    global_step = 0
+
+    accelerator.print(
+        f"[FINETUNE] Initialized weights from source checkpoint (Epoch {source_epoch}, Val mADM: {source_madm:.4f}). "
+        f"Starting fresh fine-tuning: Epoch {start_epoch} to target with clean AdamW optimizer."
+    )
+    return start_epoch, best_madm, global_step
+
+
 # =====================================================================
 # Main Training Function
 # =====================================================================
@@ -899,7 +939,9 @@ def train(args: Optional[argparse.Namespace] = None, **kwargs) -> None:
     accelerator.print(f"[DATASET] Using HDF5 container: {h5_path}")
 
     # 4. Instantiate Datasets and DataLoaders
-    train_dataset = UPARDatasetV4(h5_path=h5_path, split="train", target_size=(224, 224))
+    use_strong_aug = getattr(args, "strong_aug", True)
+    accelerator.print(f"[DATASET] Domain-Robust Surveillance Augmentation: {use_strong_aug}")
+    train_dataset = UPARDatasetV4(h5_path=h5_path, split="train", target_size=(224, 224), strong_aug=use_strong_aug)
     val_dataset = UPARDatasetV4(h5_path=h5_path, split="val", target_size=(224, 224))
 
     accelerator.print(f"[DATASET] Train Samples: {len(train_dataset):,} | Val Samples: {len(val_dataset):,}")
@@ -1009,27 +1051,36 @@ def train(args: Optional[argparse.Namespace] = None, **kwargs) -> None:
         visual_model, prompter, text_projection, optimizer, train_loader, val_loader, scheduler
     )
 
-    # 10. Resumption Handling
+    # 10. Resumption or Fine-Tuning Initialization Handling
     start_epoch = 1
     best_madm = 0.0
     global_step = 0
 
-    resume_candidate = args.resume_from
-    if not resume_candidate:
-        default_latest = os.path.join(args.output_dir, "checkpoint_latest.pt")
-        if os.path.isfile(default_latest):
-            resume_candidate = default_latest
-
-    if resume_candidate and os.path.isfile(resume_candidate):
-        start_epoch, best_madm, global_step = load_resumable_checkpoint(
-            checkpoint_path=resume_candidate,
+    if getattr(args, "finetune_from", None) and os.path.isfile(args.finetune_from):
+        start_epoch, best_madm, global_step = load_finetune_weights(
+            checkpoint_path=args.finetune_from,
             visual_model=visual_model,
             prompter=prompter,
             text_projection=text_projection,
-            optimizer=optimizer,
-            scheduler=scheduler,
             accelerator=accelerator,
         )
+    else:
+        resume_candidate = args.resume_from
+        if not resume_candidate:
+            default_latest = os.path.join(args.output_dir, "checkpoint_latest.pt")
+            if os.path.isfile(default_latest):
+                resume_candidate = default_latest
+
+        if resume_candidate and os.path.isfile(resume_candidate):
+            start_epoch, best_madm, global_step = load_resumable_checkpoint(
+                checkpoint_path=resume_candidate,
+                visual_model=visual_model,
+                prompter=prompter,
+                text_projection=text_projection,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                accelerator=accelerator,
+            )
 
     all_trainable_params = (
         [p for p in visual_model.parameters() if p.requires_grad]
@@ -1251,6 +1302,24 @@ def parse_args(args_list: Optional[List[str]] = None) -> argparse.Namespace:
         type=str,
         default=None,
         help="Path to existing checkpoint to resume training from (default: None)",
+    )
+    parser.add_argument(
+        "--finetune_from",
+        type=str,
+        default=None,
+        help="Path to checkpoint to initialize weights from for fresh fine-tuning (loads weights only, fresh optimizer/scheduler)",
+    )
+    parser.add_argument(
+        "--strong_aug",
+        action="store_true",
+        default=True,
+        help="Enable domain-robust surveillance augmentation (ColorJitter, RandAugment, RandomErasing, Blur, Grayscale)",
+    )
+    parser.add_argument(
+        "--no_strong_aug",
+        action="store_false",
+        dest="strong_aug",
+        help="Disable domain-robust surveillance augmentation (fallback to standard mild transform)",
     )
 
     # Optimization & Schedule

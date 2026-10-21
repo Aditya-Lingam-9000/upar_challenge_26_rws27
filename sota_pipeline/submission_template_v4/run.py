@@ -770,14 +770,11 @@ def rank_gallery(
         if HW.use_half:
             batch_x = batch_x.half()
 
-        # Pass 1: Original orientation
+        # Dual-Pass Horizontal Flip TTA (Original + Horizontal Flip)
         metric_emb_orig, attr_logits_orig = _VISUAL_MODEL(batch_x)
-
-        # Pass 2: Horizontal Flip TTA
         batch_x_flip = torch.flip(batch_x, dims=[-1])
         metric_emb_flip, attr_logits_flip = _VISUAL_MODEL(batch_x_flip)
 
-        # TTA Fusion: normalized sum for embeddings, mean for logits
         metric_emb = F.normalize(metric_emb_orig + metric_emb_flip, p=2, dim=-1)
         attr_logits = 0.5 * (attr_logits_orig + attr_logits_flip)
 
@@ -811,21 +808,31 @@ def rank_gallery(
     if HW.use_half:
         q_raw_t = q_raw_t.half()
 
-    query_embeds_t = _ATTR_PROMPTER.forward_multi_temp(q_raw_t)
+    query_embeds_t = _ATTR_PROMPTER(q_raw_t)
     query_embeds = query_embeds_t.cpu().float().numpy()
 
     del q_raw_t, query_embeds_t
     gc.collect()
 
     # -----------------------------------------------------------------
-    # Step 3: Championship Test-Time Compute Engine Pipeline
+    # Step 3: Attribute-Dominant Retrieval (Flip TTA + 70% Attr / 30% Metric)
     # -----------------------------------------------------------------
-    final_distances = _TT_ENGINE.run_inference_pipeline(
-        gal_embeds=gal_embeds,
-        gal_logits=gal_logits,
-        query_embeds=query_embeds,
-        queries_raw=queries_raw,
-    )
+    print("[RETRIEVAL] Computing attribute-dominant fused retrieval similarity matrix (70% attr + 30% metric)...", flush=True)
+    gal_probs = 1.0 / (1.0 + np.exp(-gal_logits))  # [G, 40]
+
+    # 1. Metric cosine similarity in [0, 1]
+    cos_sim = np.dot(query_embeds, gal_embeds.T)  # [Q, G]
+    s_metric = (cos_sim + 1.0) / 2.0
+
+    # 2. Attribute similarity: 1.0 - (L1_diff / 40.0)
+    l1_attr = np.abs(queries_raw[:, None, :] - gal_probs[None, :, :]).sum(axis=2)  # [Q, G]
+    s_attr = np.maximum(0.0, 1.0 - (l1_attr / 40.0))
+
+    # 3. Fused similarity: 0.70 attribute + 0.30 metric (attribute-dominant for mADM)
+    s_final = 0.70 * s_attr + 0.30 * s_metric
+
+    # 4. Final distance: lower distance denotes higher retrieval similarity
+    final_distances = (1.0 - s_final).astype(np.float32)
 
     elapsed = time.time() - t0
     print(f"[RETRIEVAL] SOTA Championship V4 retrieval completed ({final_distances.shape}) in {elapsed:.2f}s!", flush=True)
