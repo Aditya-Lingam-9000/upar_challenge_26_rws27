@@ -864,21 +864,24 @@ def load_finetune_weights(
     accelerator: Accelerator,
 ) -> Tuple[int, float, int]:
     """Loads weights ONLY for fine-tuning, starting fresh with a clean AdamW optimizer and scheduler."""
-    accelerator.print(f"[FINETUNE] Loading pretrained weights from: {checkpoint_path}")
+    t0 = time.time()
+    file_mb = os.path.getsize(checkpoint_path) / (1024 * 1024) if os.path.isfile(checkpoint_path) else 0
+    accelerator.print(f"[FINETUNE] Loading pretrained weights from: {checkpoint_path} ({file_mb:.1f} MB)...", flush=True)
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    accelerator.print(f"[FINETUNE] Checkpoint file read into CPU memory in {time.time() - t0:.1f}s. Parsing model weights...", flush=True)
 
     unwrapped_visual = accelerator.unwrap_model(visual_model)
     v_missing, v_unexp = unwrapped_visual.load_state_dict(clean_state_dict(checkpoint["visual_model"]), strict=False)
-    accelerator.print(f"[FINETUNE] Visual Model loaded (Missing: {len(v_missing)}, Unexpected: {len(v_unexp)})")
+    accelerator.print(f"[FINETUNE] Visual Model loaded (Missing: {len(v_missing)}, Unexpected: {len(v_unexp)})", flush=True)
 
     unwrapped_prompter = accelerator.unwrap_model(prompter)
     p_missing, p_unexp = unwrapped_prompter.load_state_dict(clean_state_dict(checkpoint["prompter"]), strict=False)
-    accelerator.print(f"[FINETUNE] Prompter loaded (Missing: {len(p_missing)}, Unexpected: {len(p_unexp)})")
+    accelerator.print(f"[FINETUNE] Prompter loaded (Missing: {len(p_missing)}, Unexpected: {len(p_unexp)})", flush=True)
 
     if "text_projection" in checkpoint:
         unwrapped_tp = accelerator.unwrap_model(text_projection)
         t_missing, t_unexp = unwrapped_tp.load_state_dict(clean_state_dict(checkpoint["text_projection"]), strict=False)
-        accelerator.print(f"[FINETUNE] Text Projection loaded (Missing: {len(t_missing)}, Unexpected: {len(t_unexp)})")
+        accelerator.print(f"[FINETUNE] Text Projection loaded (Missing: {len(t_missing)}, Unexpected: {len(t_unexp)})", flush=True)
 
     source_epoch = checkpoint.get("epoch", "unknown")
     source_madm = float(checkpoint.get("best_madm", 0.0))
@@ -891,7 +894,8 @@ def load_finetune_weights(
 
     accelerator.print(
         f"[FINETUNE] Initialized weights from source checkpoint (Epoch {source_epoch}, Val mADM: {source_madm:.4f}). "
-        f"Starting fresh fine-tuning: Epoch {start_epoch} to target with clean AdamW optimizer."
+        f"Starting fresh fine-tuning: Epoch {start_epoch} to target with clean AdamW optimizer.",
+        flush=True,
     )
     return start_epoch, best_madm, global_step
 
@@ -1153,8 +1157,8 @@ def train(args: Optional[argparse.Namespace] = None, **kwargs) -> None:
                 for k, v in loss_dict.items():
                     running_loss_breakdown[k] = running_loss_breakdown.get(k, 0.0) + v
 
-                # Logging every 50 steps
-                if (step + 1) % 50 == 0 or (step + 1) == steps_in_epoch:
+                # Logging on early steps and every 50 steps
+                if (step + 1) in [1, 5, 10, 25] or (step + 1) % 50 == 0 or (step + 1) == steps_in_epoch:
                     elapsed = time.time() - epoch_start_time
                     speed = (step + 1) / max(1e-5, elapsed)
                     effective_imgs = speed * args.batch_size * accelerator.num_processes
@@ -1178,7 +1182,8 @@ def train(args: Optional[argparse.Namespace] = None, **kwargs) -> None:
                         f"Step [{cur_step:04d}/{steps_in_epoch:04d}] | "
                         f"Loss: {avg_loss:.4f} ({loss_sub}) | "
                         f"BB-LR: {backbone_lr:.2e} | Head-LR: {head_lr:.2e} | "
-                        f"{effective_imgs:.1f} img/s | ETA: {format_time(eta_sec)}"
+                        f"{effective_imgs:.1f} img/s | ETA: {format_time(eta_sec)}",
+                        flush=True,
                     )
 
             epoch_duration = time.time() - epoch_start_time
